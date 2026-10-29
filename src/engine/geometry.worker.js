@@ -408,7 +408,17 @@ function build({ osm, terrain, ground, options }) {
     stats.styles[style]++;
     let wallC = tagColour(b[5]) || pick(palette, pr);
     let roofC = tagColour(b[4]);
-    if (!roofC) {
+    if (roofC) {
+      if (roofType) {
+        const baseTile = arche === 5 ? pick(VILLA_TILES, r3) : pick(TILES, est >= 0 ? eh * 3.7 % 1 : r3);
+        const isWarmClay = roofC[0] > roofC[1] * 1.08 && roofC[0] > roofC[2] * 1.15;
+        roofC = mix(baseTile, roofC, isWarmClay ? .68 : .25);
+      } else if (industrial) {
+        roofC = mix(pick(METAL, r3), roofC, area > 1800 ? .82 : .65);
+      } else {
+        roofC = mix(pick(FLAT, r3), roofC, .65);
+      }
+    } else {
       const s = sat(cx, cz);
       if (roofType) roofC = arche === 5 ? pick(VILLA_TILES, r3) : pick(TILES, est >= 0 ? eh * 3.7 % 1 : r3);
       else if (industrial) roofC = s ? mix(pick(METAL, r3), s, area > 2500 ? .75 : .45) : pick(METAL, r3);
@@ -456,8 +466,9 @@ function build({ osm, terrain, ground, options }) {
 
     // street life (Phase 7.1): sloped canvas tente over ground-floor shop bays, cantilevered entrance canopy on civic blocks
     if (!floating) {
-      // awnings on the high-street mahalles (coastal centre and dense apartment districts) and on retail anywhere
-      const shopfront = (arche === 1 || dense) && (style === 0 || style === 4 || arche === 1 && style === 3) || style === 6;
+      // awnings on the high-street mahalles (coastal centre, dense apartment districts, Şinasi Dural Cd.) and on retail anywhere
+      const onSinasiDural = cx > -3.77 && cx < -3.59 && cz > 5.45 && cz < 6.78;
+      const shopfront = (arche === 1 || dense || onSinasiDural) && (style === 0 || style === 4 || (arche === 1 || onSinasiDural) && style === 3) || style === 6;
       let ci = -1, cl = 0;
       for (let i = 0; i < n; i++) {
         if (roles[i] !== 0) continue;
@@ -467,13 +478,14 @@ function build({ osm, terrain, ground, options }) {
         const ex = dx / len, ez = dz / len, nx = positive ? ez : -ez, nz = positive ? -ex : ex;
         const bays = Math.max(1, Math.round(len * 1000 / bay)), w = len / bays * .43;
         const yt = base + (style === 6 ? .0031 : .0028), P = .0011, yf = yt - .0005, yv = yf - .00022;
+        const thresh = onSinasiDural ? .78 : .45;
         for (let k = 0; k < bays; k++) {
           const hk = hash2(bid * 7.13 + i, k * 3.7);
-          if (hk > .45) continue;
+          if (hk > thresh) continue;
           const t = (k + .5) / bays * len, px = ax + ex * t + nx * .00004, pz = az + ez * t + nz * .00004;
           const A = [px - ex * w, yt, pz - ez * w], B = [px + ex * w, yt, pz + ez * w];
           const F = [B[0] + nx * P, yf, B[2] + nz * P], E = [A[0] + nx * P, yf, A[2] + nz * P];
-          const sl = Math.hypot(P, .0005), up = [nx * .0005 / sl, P / sl, nz * .0005 / sl], colr = pick(AWNINGS, hk / .45);
+          const sl = Math.hypot(P, .0005), up = [nx * .0005 / sl, P / sl, nz * .0005 / sl], colr = pick(AWNINGS, hk / thresh);
           quadN(cd, [A, B, F, E], up, [0, 0, 1, 0, 1, 1, 0, 1], colr, bid, 125, base, iw);
           quadN(cd, [B, A, E, F], [-up[0], -up[1], -up[2]], [1, 0, 0, 0, 0, 1, 1, 1], colr, bid, 125, base, iw);
           quadN(cd, [E, F, [F[0], yv, F[2]], [E[0], yv, E[2]]], [nx, 0, nz], [0, 1, 1, 1, 1, 1.2, 0, 1.2], colr, bid, 125, base, iw);
@@ -954,6 +966,35 @@ function build({ osm, terrain, ground, options }) {
   for (const [x, z] of osm.trees) {
     const r = hash2(x * 91.3, z * 17.1);
     trees.push4(x, elev(x, z), z, .75 + r * .5); trees.push2(r < .25 ? 1 : 0, r);
+  }
+  // avenue plane trees (Çınar) along both sidewalks of Şinasi Dural Caddesi
+  {
+    const sdSpine = [
+      [40.8293186, 29.3056128], [40.8308508, 29.3057989], [40.8330980, 29.3061119],
+      [40.8344890, 29.3062850], [40.8372500, 29.3065800], [40.8386390, 29.3064200],
+      [40.8394580, 29.3066100], [40.8406474, 29.3069182]
+    ].map(([la, lo]) => toWorld(la, lo));
+    const inAnyBldg = (x, z) => {
+      const i0 = Math.floor(x / BG), j0 = Math.floor(z / BG);
+      for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+        const list = bgrid.get((i0 + di) + ',' + (j0 + dj)); if (!list) continue;
+        for (const id of list) if (meta[id * 12 + 2] > 0 && pointInRing(x, z, rings[id])) return true;
+      }
+      return false;
+    };
+    for (let i = 0; i + 1 < sdSpine.length; i++) {
+      const [ax, az] = sdSpine[i], [bx, bz] = sdSpine[i + 1];
+      const dx = bx - ax, dz = bz - az, segL = Math.hypot(dx, dz); if (segL < 1e-4) continue;
+      const ux = dx / segL, uz = dz / segL, vx = -uz, vz = ux;
+      for (let d = .012; d < segL - .008; d += .022) {
+        for (const side of [-1, 1]) {
+          const tx = ax + ux * d + vx * (side * .0068), tz = az + uz * d + vz * (side * .0068);
+          if (inAnyBldg(tx, tz)) continue;
+          const rr = hash2(tx * 73.1, tz * 41.9);
+          trees.push4(tx, elev(tx, tz), tz, .78 + rr * .32); trees.push2(0, rr);
+        }
+      }
+    }
   }
   const DENSITY = { wood: 1 / 70, forest: 1 / 70, nature_reserve: 1 / 160, scrub: 1 / 260, park: 1 / 260, garden: 1 / 320, cemetery: 1 / 110, orchard: 1 / 45, recreation_ground: 1 / 600, playground: 1 / 500, grass: 1 / 1600, village_green: 1 / 800, meadow: 1 / 4000, grassland: 1 / 3000 };
   let expected = 0; const candidates = [];

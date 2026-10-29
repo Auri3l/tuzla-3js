@@ -28,9 +28,10 @@ async function loadImage(src) {
   const img = new Image(); img.decoding = 'async'; img.src = src;
   await img.decode(); return img;
 }
-function imageData(img) {
-  const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
-  const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0);
+function imageData(img, maxDim = 2048) {
+  const s = Math.min(1, maxDim / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.naturalWidth * s)); c.height = Math.max(1, Math.round(img.naturalHeight * s));
+  const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, c.width, c.height);
   return g.getImageData(0, 0, c.width, c.height);
 }
 
@@ -141,7 +142,10 @@ export async function createTuzla({ canvas, container, places, quality = 'medium
   worker.postMessage({ type: 'build', osm: { buildings: osm.buildings, roads: osm.roads, land: osm.land, trees: osm.trees, pois: osm.pois.map(p => Object.assign([...p], { wx: p.wx, wz: p.wz })) }, terrain, ground: { width: groundPixels.width, height: groundPixels.height, data: groundPixels.data }, options: { treeBudget: QUALITY.high.trees, chunkSize: 1.6 } });
 
   /* ---- terrain and water (built while the worker runs) */
-  const groundTex = new THREE.Texture(groundImg); groundTex.colorSpace = THREE.SRGBColorSpace; groundTex.anisotropy = 8; groundTex.needsUpdate = true;
+  const groundTex = new THREE.Texture(groundImg); groundTex.colorSpace = THREE.SRGBColorSpace;
+  groundTex.anisotropy = renderer.capabilities.getMaxAnisotropy ? renderer.capabilities.getMaxAnisotropy() : 16;
+  groundTex.generateMipmaps = true; groundTex.minFilter = THREE.LinearMipmapLinearFilter; groundTex.magFilter = THREE.LinearFilter;
+  groundTex.needsUpdate = true;
   const maskTex = maskImg ? new THREE.Texture(maskImg) : new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1);
   maskTex.needsUpdate = true; maskTex.minFilter = THREE.LinearFilter; maskTex.generateMipmaps = false;
   const tMat = terrainMaterial(groundTex, maskTex, landTexture(osm.land, terrain.bounds));

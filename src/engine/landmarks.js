@@ -763,6 +763,146 @@ function marmaray(ctx, nextId) {
   return n;
 }
 
+/* -------------------------- 6.6 Şinasi Dural Caddesi Streetscape & Landmarks */
+const SINASI_SPINE = [
+  [40.8293186, 29.3056128],
+  [40.8300500, 29.3057050],
+  [40.8308508, 29.3057989],
+  [40.8319850, 29.3059550],
+  [40.8330980, 29.3061119],
+  [40.8344890, 29.3062850],
+  [40.8358500, 29.3064400],
+  [40.8372500, 29.3065800],
+  [40.8386390, 29.3064200],
+  [40.8394580, 29.3066100],
+  [40.8406474, 29.3069182]
+];
+
+const SINASI_STOPS = [
+  [40.840810, 29.306380, -1], // Evliya Çelebi Camii (West / Northbound)
+  [40.840880, 29.306781, 1],  // Evliya Çelebi Camii (East / Southbound)
+  [40.838639, 29.306325, -1], // Hilmi Sonay ASM (West)
+  [40.838506, 29.306513, 1],  // Hilmi Sonay ASM (East)
+  [40.834489, 29.306223, -1], // Cezeri MTAL (West)
+  [40.834927, 29.306344, 1]   // Cezeri MTAL (East)
+];
+
+const SINASI_CROSSINGS = [
+  [40.831600, 29.305890], // Yeni Ceren / Ünsal Eczanesi
+  [40.834700, 29.306305], // Cezeri Mesleki ve Teknik Anadolu Lisesi
+  [40.838820, 29.306460], // Hilmi Sonay ASM / Barbaros Eczanesi
+  [40.840520, 29.306875]  // Evliya Çelebi Merkez Camii / CarrefourSA
+];
+
+const SINASI_PHARMACIES = [
+  [40.839012, 29.306532], // Barbaros Eczanesi
+  [40.831985, 29.305776], // Yeni Ceren Eczanesi
+  [40.831312, 29.305637]  // Ünsal Eczanesi
+];
+
+function sinasiDural(ctx, nextId) {
+  let n = 0;
+  const pts = SINASI_SPINE.map(([la, lo]) => toWorld(la, lo));
+  const PAVING = hex('#c9c3b6'), KERB = hex('#9a968e'), STRIPE = hex('#ecebe6');
+  const ANTHRACITE = hex('#2d3338'), BENCH = hex('#8d5f3c'), IETT_YELLOW = hex('#eab81c'), IETT_RED = hex('#c92a22');
+
+  // 1. Continuous raised sidewalks & stone kerbs along both sides of Şinasi Dural Caddesi
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
+    const dx = bx - ax, dz = bz - az, segL = Math.hypot(dx, dz);
+    if (segL < 1e-5) continue;
+    const ux = dx / segL, uz = dz / segL, vx = -uz, vz = ux;
+    const steps = Math.max(1, Math.ceil(segL / (24 * M))), stepL = segL / steps;
+    for (let s = 0; s < steps; s++) {
+      const mx = ax + ux * (s + .5) * stepL, mz = az + uz * (s + .5) * stepL;
+      const g = ctx.elev(mx, mz), P = painter(ctx, mx, mz, g, nextId());
+      for (const side of [-1, 1]) {
+        const sx = mx + vx * side * 6.8 * M, sz = mz + vz * side * 6.8 * M, sg = ctx.elev(sx, sz);
+        // Sidewalk pavement slab (2.2 m wide, 16 cm above road)
+        P.box(sx, sz, sg - .4 * M, sg + .56 * M, stepL / 2 + .08 * M, 1.1 * M, ux, uz, PAVING, P.PLAIN);
+        // Kerbstone lip facing the asphalt
+        const kx = mx + vx * side * 5.62 * M, kz = mz + vz * side * 5.62 * M;
+        P.box(kx, kz, sg - .2 * M, sg + .58 * M, stepL / 2 + .08 * M, .12 * M, ux, uz, KERB, P.PLAIN);
+      }
+      n++;
+    }
+  }
+
+  // 2. Zebra pedestrian crosswalks across the avenue
+  for (const [la, lo] of SINASI_CROSSINGS) {
+    const [cx, cz] = toWorld(la, lo), g = ctx.elev(cx, cz), P = painter(ctx, cx, cz, g, nextId());
+    const ux = .085, uz = -.996, vx = -uz, vz = ux;
+    for (let k = -3; k <= 3; k++) {
+      const px = cx + vx * k * 1.35 * M, pz = cz + vz * k * 1.35 * M, pg = ctx.elev(px, pz);
+      P.box(px, pz, pg + .38 * M, pg + .44 * M, 1.45 * M, .24 * M, ux, uz, STRIPE, P.PLAIN);
+    }
+    n++;
+  }
+
+  // 3. Real-world İETT modern glass bus shelters + yellow/red stop totems
+  for (const [la, lo, side] of SINASI_STOPS) {
+    const [sx, sz] = toWorld(la, lo), g = ctx.elev(sx, sz), P = painter(ctx, sx, sz, g, nextId());
+    const ux = .085, uz = -.996, vx = -uz, vz = ux;
+    // Raised boarding platform
+    P.box(sx, sz, g - .4 * M, g + .62 * M, 2.4 * M, .95 * M, ux, uz, PAVING, P.PLAIN);
+    // Rear tempered glass wall & anthracite frame
+    const bx = sx + vx * side * .55 * M, bz = sz + vz * side * .55 * M;
+    P.box(bx, bz, g + .62 * M, g + 3.05 * M, 2.05 * M, .06 * M, ux, uz, hex('#6a8793'), P.METAL);
+    for (const c of [-1.95, 0, 1.95]) {
+      P.box(bx + ux * c * M, bz + uz * c * M, g + .62 * M, g + 3.15 * M, .08 * M, .09 * M, ux, uz, ANTHRACITE, P.METAL);
+    }
+    // Cantilevered shelter roof canopy
+    P.box(sx + vx * side * .05 * M, sz + vz * side * .05 * M, g + 3.12 * M, g + 3.26 * M, 2.25 * M, .88 * M, ux, uz, ANTHRACITE, P.METAL, { topColour: hex('#dfe4e6') });
+    // Passenger wooden bench
+    P.box(bx - vx * side * .32 * M, bz - vz * side * .32 * M, g + 1.05 * M, g + 1.15 * M, 1.35 * M, .24 * M, ux, uz, BENCH, P.PLAIN);
+    // İETT yellow/red totem sign at the kerb
+    const tx = sx + ux * 2.55 * M - vx * side * .45 * M, tz = sz + uz * 2.55 * M - vz * side * .45 * M;
+    P.box(tx, tz, g + .6 * M, g + 2.85 * M, .12 * M, .22 * M, ux, uz, IETT_YELLOW, P.PLAIN);
+    P.box(tx, tz, g + 2.85 * M, g + 3.25 * M, .13 * M, .24 * M, ux, uz, IETT_RED, P.PLAIN);
+    n++;
+  }
+
+  // 4. Tuzla Cezeri Mesleki ve Teknik Anadolu Lisesi entrance gate portal & courtyard flagpole
+  {
+    const [gx, gz] = toWorld(40.83468, 29.30602), g = ctx.elev(gx, gz), P = painter(ctx, gx, gz, g, nextId());
+    const ux = .085, uz = -.996, vx = -uz, vz = ux;
+    for (const s of [-1, 1]) {
+      P.box(gx + ux * s * 3.8 * M, gz + uz * s * 3.8 * M, g - .5 * M, g + 4.4 * M, .45 * M, .55 * M, ux, uz, CREAM, P.PLAIN);
+    }
+    // Overhead school portal arch beam
+    P.box(gx, gz, g + 3.8 * M, g + 4.65 * M, 4.5 * M, .65 * M, ux, uz, hex('#2b4a6f'), P.PLAIN, { topColour: WHITE });
+    // Ceremonial flagpole & Turkish flag in school forecourt
+    const fx = gx - vx * 9 * M, fz = gz - vz * 9 * M, fg = ctx.elev(fx, fz);
+    P.cyl(fx, fz, fg, fg + 11 * M, .09 * M, .05 * M, 8, WHITE, P.METAL);
+    P.sheet([[fx, fg + 9.4 * M, fz], [fx + 2.1 * M, fg + 9.2 * M, fz + .4 * M], [fx + 2.1 * M, fg + 10.6 * M, fz + .4 * M], [fx, fg + 10.8 * M, fz]], IETT_RED);
+    n++;
+  }
+
+  // 5. Hilmi Sonay ASM & Avenue Pharmacy ("E") illuminated street totems
+  for (const [la, lo] of SINASI_PHARMACIES) {
+    const [px, pz] = toWorld(la, lo), g = ctx.elev(px, pz), P = painter(ctx, px, pz, g, nextId());
+    P.cyl(px, pz, g - .2 * M, g + 3.2 * M, .09 * M, .09 * M, 6, STEEL, P.METAL);
+    P.box(px, pz, g + 3.2 * M, g + 4.15 * M, .48 * M, .14 * M, 1, 0, IETT_RED, P.PLAIN, { topColour: WHITE });
+    P.box(px, pz, g + 3.4 * M, g + 3.95 * M, .32 * M, .16 * M, 1, 0, WHITE, P.PLAIN);
+    n++;
+  }
+
+  // 6. Evliya Çelebi Merkez Camii courtyard octagonal şadırvan (at north head of Şinasi Dural Caddesi)
+  {
+    const [sx, sz] = toWorld(40.84086, 29.30656), g = ctx.elev(sx, sz), P = painter(ctx, sx, sz, g, nextId());
+    P.cyl(sx, sz, g - .3 * M, g + .45 * M, 3.6 * M, 3.6 * M, 8, CREAM, P.PLAIN);
+    P.cyl(sx, sz, g + .45 * M, g + 1.65 * M, 1.3 * M, 1.3 * M, 8, hex('#ded5c3'), P.PLAIN);
+    for (let k = 0; k < 8; k++) {
+      const th = k / 8 * Math.PI * 2, cx = sx + Math.cos(th) * 3.1 * M, cz = sz + Math.sin(th) * 3.1 * M;
+      P.cyl(cx, cz, g + .45 * M, g + 2.85 * M, .14 * M, .14 * M, 6, CREAM, P.PLAIN);
+    }
+    P.cyl(sx, sz, g + 2.85 * M, g + 4.45 * M, 3.9 * M, 0, 8, hex('#7d8790'), P.ctx.roof(14));
+    n++;
+  }
+
+  return n;
+}
+
 /* -------------------------------------------------------------- entry */
 export function buildLandmarks(ctx) {
   let id = ctx.firstId;
@@ -773,6 +913,7 @@ export function buildLandmarks(ctx) {
   stats.circuitPieces = istanbulPark(ctx, nextId);
   stats.campusPieces = campuses(ctx, nextId);
   stats.stationPieces = marmaray(ctx, nextId);
+  stats.sinasiPieces = sinasiDural(ctx, nextId);
   return stats;
 }
 

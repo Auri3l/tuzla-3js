@@ -618,11 +618,11 @@ float tzOut = max(max(uBounds.x - vTWorld.x, vTWorld.x - uBounds.z), max(uBounds
 {
   vec4 lt = texture2D(uLand, tzUv);
   vec3 g = diffuseColor.rgb;
-  // land-use tint and close-range detail
-  g = mix(g, lt.rgb, lt.a * .42);
+  // subtle land-use tint and micro-detail while preserving sharp Google satellite orthoimagery
+  g = mix(g, lt.rgb, lt.a * .16);
   float d = tzFbm(vTWorld.xz * 260.0);
   float d2 = tzNoise(vTWorld.xz * 1400.0);
-  g *= .86 + .2 * d + .08 * d2;
+  g *= .93 + .1 * d + .04 * d2;
   // beyond the mosaic: fade the smeared border to a neutral landscape
   float outside = smoothstep(-.3, .8, tzOut);
   g = mix(g, vec3(.17, .19, .15) * (.85 + .3 * d), outside);
