@@ -1,0 +1,63 @@
+name: Opus 5.5 Ticket Queue & Build Verification
+
+on:
+  push:
+    branches: [main, 'phase-*', 'ticket-*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target_ticket:
+        description: 'Optional Ticket ID to highlight (e.g. 1.1, 1.2)'
+        required: false
+        default: 'next'
+
+permissions:
+  contents: read
+
+jobs:
+  verify-ticket-queue:
+    name: Verify Build, Standalone Bundle & Ticket Progress
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Report Active Ticket Queue Status
+        run: |
+          python3 - << 'EOF'
+          from pathlib import Path
+          import re
+
+          q = Path("WORKFLOW_QUEUE.md").read_text(encoding="utf-8")
+          done = re.findall(r"^- \[x\] \*\*(Ticket [0-9.]+)\*\* — (.*)$", q, re.M)
+          todo = re.findall(r"^- \[ \] \*\*(Ticket [0-9.]+)\*\* — (.*)$", q, re.M)
+          total = len(done) + len(todo)
+          print(f"=== TUZLA-3JS OPUS 5.5 WORKFLOW PROGRESS: {len(done)}/{total} TICKETS COMPLETED ===")
+          if done:
+              print(f"Last completed: {done[-1][0]} — {done[-1][1]}")
+          if todo:
+              print(f"NEXT TICKET IN ORDER: {todo[0][0]} — {todo[0][1]}")
+          else:
+              print("ALL 8 PHASES COMPLETE!")
+          EOF
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify Vite Production Build
+        run: npm run build
+
+      - name: Verify Standalone Offline HTML Packaging
+        run: python3 scripts/build_standalone.py
