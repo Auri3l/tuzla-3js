@@ -9,7 +9,8 @@
 //   ctx.wall(style)  -> info.y for a facade wall of that style
 //   ctx.roof(style)  -> info.y for a roof-type surface (13 metal, 14 dome, 15 plain)
 //   ctx.iw(floors, seed) -> info.w
-// plus ctx.meta / ctx.names / ctx.rings (per-building metadata, names and cleaned footprints).
+// plus ctx.meta / ctx.names / ctx.rings (per-building metadata, names and cleaned footprints)
+// and ctx.roads (OSM line features: kind 4 motorway, 5 rail, 6 coastline).
 import { toWorld, hash2 } from './geo.js';
 
 const hex = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
@@ -656,6 +657,112 @@ function campuses(ctx, nextId) {
   return n;
 }
 
+/* ------------------------------------------ 6.5 Marmaray stations & overpasses */
+const STATIONS = [['Aydıntepe', 40.852295, 29.293196], ['İçmeler', 40.845687, 29.300038], ['Tuzla', 40.82995, 29.322427]];
+const RAIL_LIFT = .6 * M; // rail chains (and the trains on them) ride this far above the terrain
+
+/** Segments of a road kind within r of (x,z): [ax, az, bx, bz]. */
+function segmentsNear(roads, kind, x, z, r) {
+  const out = [];
+  for (const [k, a] of roads) {
+    if (k !== kind) continue;
+    for (let i = 0; i + 3 < a.length; i += 2) {
+      const mx = (a[i] + a[i + 2]) / 2, mz = (a[i + 1] + a[i + 3]) / 2;
+      if (Math.hypot(mx - x, mz - z) < r) out.push([a[i], a[i + 1], a[i + 2], a[i + 3]]);
+    }
+  }
+  return out;
+}
+/** Length-weighted dominant direction of undirected segments. */
+function dominantDir(segs) {
+  let sx = 0, sz = 0;
+  for (const [ax, az, bx, bz] of segs) { const dx = bx - ax, dz = bz - az, l = Math.hypot(dx, dz), t = Math.atan2(dz, dx) * 2; sx += Math.cos(t) * l; sz += Math.sin(t) * l; }
+  const t = Math.atan2(sz, sx) / 2; return [Math.cos(t), Math.sin(t)];
+}
+/** Sorted lateral offsets of segment midpoints along (vx,vz), merged when closer than `merge`. */
+function laneOffsets(segs, x, z, vx, vz, merge) {
+  const o = segs.map(([ax, az, bx, bz]) => ((ax + bx) / 2 - x) * vx + ((az + bz) / 2 - z) * vz).sort((a, b) => a - b), out = [];
+  for (const v of o) { if (out.length && v - out[out.length - 1][1] < merge) out[out.length - 1][1] = v; else out.push([v, v]); }
+  return out.map(([a, b]) => (a + b) / 2);
+}
+
+/** Glass-walled footbridge between two points with stair/lift towers at the ends. */
+function footbridge(P, ctx, a, b, deckY, towers = true) {
+  const dx = b[0] - a[0], dz = b[1] - a[1], L = Math.hypot(dx, dz), ux = dx / L, uz = dz / L, cx = (a[0] + b[0]) / 2, cz = (a[1] + b[1]) / 2;
+  P.box(cx, cz, deckY - 1.2 * M, deckY, L / 2, 2.4 * M, ux, uz, CONCRETE, P.PLAIN, { bottom: true });
+  P.box(cx, cz, deckY, deckY + 3 * M, L / 2 - .1 * M, 2.1 * M, ux, uz, hex('#a9bcc6'), P.PLAIN, { wall: { style: 1, bay: 2.2, floorH: 3 }, top: false });
+  P.box(cx, cz, deckY + 3 * M, deckY + 3.4 * M, L / 2 + .3 * M, 2.6 * M, ux, uz, WHITE, P.PLAIN, { bottom: true });
+  if (!towers) return;
+  for (const [x, z] of [a, b]) {
+    const g = ctx.elev(x, z);
+    P.box(x, z, g - 1 * M, deckY + 3.4 * M, 2.8 * M, 2.8 * M, ux, uz, hex('#a9bcc6'), P.PLAIN, { wall: { style: 1, bay: 2.8, floorH: 3.4 }, topColour: WHITE });
+  }
+}
+
+function station(P, ctx, x, z) {
+  const rails = segmentsNear(ctx.roads, 5, x, z, .12);
+  if (rails.length < 2) return 0;
+  const [ux, uz] = dominantDir(rails), vx = -uz, vz = ux;
+  const lanes = laneOffsets(rails, x, z, vx, vz, 2.5 * M);
+  // island platform in the widest gap between tracks (trains run ±1.3 m off each centreline, 3 m wide)
+  let best = -1, gap = 0;
+  for (let i = 0; i + 1 < lanes.length; i++) if (lanes[i + 1] - lanes[i] > gap) { gap = lanes[i + 1] - lanes[i]; best = i; }
+  const clear = 3.1 * M;
+  let off, w;
+  if (best >= 0 && gap - 2 * clear >= 4 * M) { off = (lanes[best] + lanes[best + 1]) / 2; w = gap - 2 * clear; }
+  else { off = lanes[lanes.length - 1] + clear + 3.5 * M; w = 7 * M; } // side platform beyond the outer track
+  const L = 180 * M, SEG = 10, at = (s, d) => [x + ux * s + vx * (off + d), z + uz * s + vz * (off + d)];
+  for (let k = 0; k < SEG; k++) {
+    const s = -L / 2 + (k + .5) * L / SEG, [px, pz] = at(s, 0), rail = ctx.elev(px, pz) + RAIL_LIFT, top = rail + 1 * M;
+    P.box(px, pz, rail - 1.2 * M, top, L / SEG / 2 + .05 * M, w / 2, ux, uz, CONCRETE, P.PLAIN, { topColour: hex('#c9c4ba') });
+    // yellow safety lines along both edges
+    for (const e of [-1, 1]) P.box(...at(s, e * (w / 2 - .45 * M)), top, top + .02 * M, L / SEG / 2, .15 * M, ux, uz, hex('#e9c21f'));
+    // cantilevered butterfly canopy on a central column row
+    if (k > 0 && k < SEG - 1) {
+      const cy = top + 4.6 * M, hw = w / 2 + .8 * M;
+      for (const c of [-.25, .25]) { const [qx, qz] = at(s + c * L / SEG, 0); P.cyl(qx, qz, top, cy, .22 * M, .22 * M, 8, STEEL); }
+      const p = (ss, d, y) => { const [qx, qz] = at(ss, d); return [qx, y, qz]; }, s0 = s - L / SEG / 2, s1 = s + L / SEG / 2;
+      for (const e of [-1, 1]) P.sheet([p(s0, 0, cy), p(s1, 0, cy), p(s1, e * hw, cy + .8 * M), p(s0, e * hw, cy + .8 * M)], k % 2 ? hex('#dfe5e8') : hex('#cfd8dc'));
+      P.beam(p(s0, 0, cy - .05 * M), p(s1, 0, cy - .05 * M), .35 * M, STEEL);
+    }
+  }
+  // concourse footbridge across every track, landing on the island via a lift tower
+  const s = L * .3, lo = lanes[0] - off - 9 * M, hi = lanes[lanes.length - 1] - off + 9 * M;
+  const [mx, mz] = at(s, 0), rail = ctx.elev(mx, mz) + RAIL_LIFT, deck = rail + 8 * M;
+  footbridge(P, ctx, at(s, Math.min(lo, -w / 2 - 6 * M)), at(s, Math.max(hi, w / 2 + 6 * M)), deck);
+  P.box(mx, mz, rail + 1 * M, deck + 3.4 * M, 2.4 * M, Math.min(2.4 * M, w / 2 - .4 * M), ux, uz, hex('#a9bcc6'), P.PLAIN, { wall: { style: 1, bay: 2.4, floorH: 3.4 }, topColour: WHITE });
+  return 1;
+}
+
+/** Footbridge over the D-100 / E-80 carriageways nearest to a point. */
+function motorwayOverpass(ctx, nextId, x, z) {
+  let best = Infinity, bx = 0, bz = 0;
+  for (const [k, a] of ctx.roads) {
+    if (k !== 4) continue;
+    for (let i = 0; i < a.length; i += 2) { const d = Math.hypot(a[i] - x, a[i + 1] - z); if (d < best) { best = d; bx = a[i]; bz = a[i + 1]; } }
+  }
+  if (best > .6) return 0;
+  const segs = segmentsNear(ctx.roads, 4, bx, bz, .05);
+  if (!segs.length) return 0;
+  const [ux, uz] = dominantDir(segs), vx = -uz, vz = ux;
+  const lanes = laneOffsets(segs, bx, bz, vx, vz, 3 * M);
+  const lo = lanes[0] - 20 * M, hi = lanes[lanes.length - 1] + 20 * M;
+  let g = -Infinity; for (let t = lo; t <= hi; t += 5 * M) g = Math.max(g, ctx.elev(bx + vx * t, bz + vz * t));
+  const P = painter(ctx, bx, bz, ctx.elev(bx, bz), nextId());
+  footbridge(P, ctx, [bx + vx * lo, bz + vz * lo], [bx + vx * hi, bz + vz * hi], g + 6.5 * M);
+  return 1;
+}
+
+function marmaray(ctx, nextId) {
+  let n = 0;
+  for (const [, lat, lon] of STATIONS) {
+    const [x, z] = toWorld(lat, lon), g = ctx.elev(x, z);
+    n += station(painter(ctx, x, z, g, nextId()), ctx, x, z);
+    n += motorwayOverpass(ctx, nextId, x, z);
+  }
+  return n;
+}
+
 /* -------------------------------------------------------------- entry */
 export function buildLandmarks(ctx) {
   let id = ctx.firstId;
@@ -665,6 +772,7 @@ export function buildLandmarks(ctx) {
   stats.marinaPieces = marina(ctx, nextId);
   stats.circuitPieces = istanbulPark(ctx, nextId);
   stats.campusPieces = campuses(ctx, nextId);
+  stats.stationPieces = marmaray(ctx, nextId);
   return stats;
 }
 

@@ -357,7 +357,7 @@ function build({ osm, terrain, ground, options }) {
     stats.mosques = (stats.mosques || 0) + 1;
   }
   // hero landmarks share the chunk buffers; info encoders must match vert() above
-  Object.assign(stats, buildLandmarks({ vert, getChunk, elev, pois: osm.pois, meta, names, rings: osm.buildings, firstId: total, wall: s => s, roof: s => 10 + s, iw: (floors, seed) => seed }));
+  Object.assign(stats, buildLandmarks({ vert, getChunk, elev, pois: osm.pois, roads: osm.roads, meta, names, rings: osm.buildings, firstId: total, wall: s => s, roof: s => 10 + s, iw: (floors, seed) => seed }));
   progress('buildings', 1);
 
   const chunkOut = [], transfer = [];
