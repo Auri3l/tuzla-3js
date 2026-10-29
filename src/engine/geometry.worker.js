@@ -378,6 +378,7 @@ function build({ osm, terrain, ground, options }) {
     else if (site) { arche = 4; palette = SITE_WALLS; }
     else if (dense && style === 4) arche = 2;
     else if (villa) { arche = 5; palette = VILLA_WALLS; }
+    else if (industrial && (style === 2 || style === 7) && !inShipyard(cx, cz)) arche = area > 1200 ? 7 : 6; // OSB hall; 7 with loading docks
     stats.arche = stats.arche || [0, 0, 0, 0, 0, 0, 0, 0]; stats.arche[arche]++;
 
     // colours
@@ -603,7 +604,31 @@ function build({ osm, terrain, ground, options }) {
             stats.solar = (stats.solar || 0) + 1;
           }
         }
-        if ((style === 2 || style === 6 || style === 7) && area > 450) {
+        if (arche >= 6 && style === 2 && area > 2800) {
+          // sawtooth (shed) roof: rows of north-light glazing with a metal back slope, ridges along the hall
+          const vx = -az, vz = ax, H = .0016, W = .0075, cs = [], ct = [];
+          for (let i = 0; i < n; i++) { const dx = ring[i * 2] - cx, dz = ring[i * 2 + 1] - cz; ct.push(dx * ax + dz * az); cs.push(dx * vx + dz * vz); }
+          const spans = sv => {
+            const ts = [];
+            for (let i = 0; i < n; i++) { const j = (i + 1) % n, a = cs[i] - sv, b2 = cs[j] - sv; if ((a < 0) !== (b2 < 0)) ts.push(ct[i] + (ct[j] - ct[i]) * a / (a - b2)); }
+            ts.sort((p, q) => p - q); const out = []; for (let k = 0; k + 1 < ts.length; k += 2) out.push([ts[k], ts[k + 1]]); return out;
+          };
+          const s0 = Math.min(...cs), s1 = Math.max(...cs), P = (t, sv, y) => [cx + ax * t + vx * sv, y, cz + az * t + vz * sv];
+          let teeth = 0;
+          for (let sv = s0 + .003; sv + W < s1 - .002; sv += W) {
+            const A = spans(sv), B = spans(sv + W);
+            for (const [a0, a1] of A) for (const [b0, b1] of B) {
+              const t0 = Math.max(a0, b0) + .0012, t1 = Math.min(a1, b1) - .0012; if (t1 - t0 < .004) continue;
+              const L = (t1 - t0) * 1000, lo = roofY + .00005, hi = lo + H;
+              quadN(c, [P(t0, sv, lo), P(t1, sv, lo), P(t1, sv, hi), P(t0, sv, hi)], [-vx, 0, -vz], [0, 0, L, 0, L, 1.6, 0, 1.6], wallC, bid, 122, base, iw);
+              const sl = Math.hypot(W, H), ny = W / sl, nh = H / sl;
+              quadN(c, [P(t0, sv, hi), P(t1, sv, hi), P(t1, sv + W, lo), P(t0, sv + W, lo)], [vx * nh, ny, vz * nh], [0, 0, L, 0, L, sl * 1000, 0, sl * 1000], roofC, bid, 113, base, iw);
+              for (const [t, d] of [[t0, -1], [t1, 1]]) quadN(c, [P(t, sv, lo), P(t, sv + W, lo), P(t, sv, hi), P(t, sv, hi)], [ax * d, 0, az * d], [0, 0, 7.5, 0, 0, 1.6, 0, 1.6], roofC, bid, 113, base, iw);
+              teeth++;
+            }
+          }
+          if (teeth) stats.sawtooth = (stats.sawtooth || 0) + 1;
+        } else if ((style === 2 || style === 6 || style === 7) && area > 450) {
           const span = Math.sqrt(area) / 1000;
           if (r3 < .5 || style === 6) {
             const units = area > 2500 ? 3 : area > 1000 ? 2 : 1;

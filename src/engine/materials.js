@@ -339,6 +339,27 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
         tex = mix(wood, wood * .6, (1.0 - smoothstep(.0, .12 + fwb, bd)) * clamp(1.0 - fwb * 2.0, 0.0, 1.0)); msk = vec3(0.0, 0.0, .5 + .15 * step(.5, bd));
       }
     }
+    // OSB halls (Phase 4.4): corporate fascia band under the roof edge, truck docks on big warehouses
+    if (arche > 5.5 && wallRole < 2.5 && vFacade.y > 0.0) {
+      float ak = fract(seed * 4.3);
+      vec3 acc = ak < .25 ? vec3(.1, .27, .58) : ak < .45 ? vec3(.68, .13, .11) : ak < .6 ? vec3(.14, .44, .25) : ak < .75 ? vec3(.86, .45, .1) : vec3(.68, .7, .72);
+      float fb = floors - vFacade.y;
+      if (fb < .2 && fb > -.3) { tex = fb < .03 && fb > -.02 ? vec3(.92) : acc; msk = vec3(0.0, 0.0, .6); }
+      if (arche > 6.5 && fl < .5 && wallRole < .5 && mod(bay, 3.0) < 1.5) {
+        // dock bay: black rubber shelter, sectional overhead door with panel grooves, two rubber bumpers
+        float ax = abs(cell.x - .5);
+        if (ax < .36 && cell.y < .72) {
+          tex = vec3(.07); msk = vec3(0.0, 0.0, .65);
+          if (ax < .3 && cell.y > .1 && cell.y < .66) {
+            float pg = fract((cell.y - .1) / .56 * 6.0), fwp = fwidth(cell.y) * 10.7;
+            tex = vec3(.8, .81, .8) * (1.0 - .35 * (1.0 - smoothstep(.0, .08 + fwp, pg)));
+            if (abs(cell.y - .43) < .03 && ax < .26) tex = vec3(.35, .42, .46); // vision panel row
+            msk = vec3(0.0, 0.0, .45 + .1 * step(.5, pg));
+          }
+        }
+        if (ax > .2 && ax < .27 && cell.y < .1) { tex = vec3(.04); msk = vec3(0.0, 0.0, .8); }
+      }
+    }
     // shop awnings take a per-shop colour; coastal awnings are striped canvas
     vec3 awn = mix(vec3(.62,.2,.16), mix(vec3(.16,.32,.5), vec3(.75,.58,.2), step(.5, fract(h * 7.0))), step(.4, h));
     if (coastal) awn = mix(awn, vec3(.93, .9, .82), step(.5, fract(cell.x * 7.0)));
