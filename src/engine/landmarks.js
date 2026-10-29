@@ -9,6 +9,7 @@
 //   ctx.wall(style)  -> info.y for a facade wall of that style
 //   ctx.roof(style)  -> info.y for a roof-type surface (13 metal, 14 dome, 15 plain)
 //   ctx.iw(floors, seed) -> info.w
+// plus ctx.meta / ctx.names / ctx.rings (per-building metadata, names and cleaned footprints).
 import { toWorld, hash2 } from './geo.js';
 
 const hex = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
@@ -311,18 +312,18 @@ function pontoon(P, x0, z0, x1, z1) {
   }
 }
 
-function lighthouse(P, x, z, g) {
+function lighthouse(P, x, z, g, [band, band2] = [RED, WHITE]) {
   const y = Math.max(0, g);
   P.cyl(x, z, y - 1 * M, y + 1.5 * M, 2.6 * M, 2.4 * M, 10, CONCRETE);
   const H = 11 * M, N = 6;
   for (let k = 0; k < N; k++) {
     const a = k / N, b = (k + 1) / N;
-    P.cyl(x, z, y + 1.5 * M + H * a, y + 1.5 * M + H * b, 1.6 * M - .5 * M * a, 1.6 * M - .5 * M * b, 10, k % 2 ? WHITE : RED);
+    P.cyl(x, z, y + 1.5 * M + H * a, y + 1.5 * M + H * b, 1.6 * M - .5 * M * a, 1.6 * M - .5 * M * b, 10, k % 2 ? band2 : band);
   }
   const top = y + 1.5 * M + H;
   P.cyl(x, z, top, top + .35 * M, 1.8 * M, 1.8 * M, 10, DARK);
   P.cyl(x, z, top + .35 * M, top + 2.1 * M, .8 * M, .8 * M, 8, hex('#f6efc6'));
-  P.cyl(x, z, top + 2.1 * M, top + 3.2 * M, 1 * M, 0, 8, RED);
+  P.cyl(x, z, top + 2.1 * M, top + 3.2 * M, 1 * M, 0, 8, band);
 }
 
 function pavilion(P, x, z, g, r) {
@@ -515,6 +516,146 @@ function istanbulPark(ctx, nextId) {
   return 3 + F1.vip.length;
 }
 
+/* ------------------------------------------------ 6.4 University campuses */
+// Free plots were found next to each campus POI by scanning for clearance from
+// building footprints, road ribbons and water; named halls are crowned in place.
+const CAMPUS = {
+  sabanci: { lakeTower: [2.300, -0.360] },
+  itu: { sim: [-4.790, 8.378], mast: [-4.800, 8.390] },
+  piriReis: { sim: [-5.0407, 8.4293], tower: [-5.0487, 8.390] },
+  okan: { arc: [3.4425, -6.8757], dorm: [3.5113, -6.735] }
+};
+const BRICK = hex('#a45a3f'), CREAM = hex('#e6dcc4'), GLASS = hex('#9fb6c2'), COPPER = hex('#5f8f7e');
+
+/** Oriented extent of a footprint ring: centre, unit long axis u, half sizes. */
+function footprintBox(ring) {
+  let best = 0, ux = 1, uz = 0;
+  for (let i = 0; i < ring.length; i += 2) {
+    const j = (i + 2) % ring.length, dx = ring[j] - ring[i], dz = ring[j + 1] - ring[i + 1], l = Math.hypot(dx, dz);
+    if (l > best) { best = l; ux = dx / l; uz = dz / l; }
+  }
+  let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+  for (let i = 0; i < ring.length; i += 2) {
+    const a = ring[i] * ux + ring[i + 1] * uz, b = -ring[i] * uz + ring[i + 1] * ux;
+    a0 = Math.min(a0, a); a1 = Math.max(a1, a); b0 = Math.min(b0, b); b1 = Math.max(b1, b);
+  }
+  const ca = (a0 + a1) / 2, cb = (b0 + b1) / 2;
+  return { x: ca * ux - cb * uz, z: ca * uz + cb * ux, ux, uz, ha: (a1 - a0) / 2, hb: (b1 - b0) / 2 };
+}
+
+/** Named buildings: [{ bid, ring, top, ground }] matching a pattern. */
+function namedBuildings(ctx, re) {
+  const out = [];
+  for (const id in ctx.names) {
+    if (!re.test(ctx.names[id])) continue;
+    const ring = ctx.rings[id]; if (!Array.isArray(ring) || typeof ring[0] !== 'number') continue;
+    const m = id * 12; out.push({ bid: +id, ring, top: ctx.meta[m + 11], ground: ctx.meta[m + 6] });
+  }
+  return out;
+}
+
+/** Glass barrel vault with steel ribs along the long axis of a roof. */
+function barrelVault(P, f, y, rise) {
+  const { x, z, ux, uz } = f, vx = -uz, vz = ux, ha = f.ha * .85, hb = f.hb * .8, SEG = 10;
+  const arc = s => { const o = []; for (let k = 0; k <= SEG; k++) { const t = k / SEG * Math.PI; o.push([x + ux * s + vx * Math.cos(t) * hb, y + Math.sin(t) * rise, z + uz * s + vz * Math.cos(t) * hb]); } return o; };
+  const ribs = Math.max(2, Math.round(ha * 2 / (6 * M)));
+  for (let k = 0; k < ribs; k++) {
+    const s0 = -ha + k / ribs * ha * 2, s1 = -ha + (k + 1) / ribs * ha * 2;
+    const a = arc(s0), b = arc(s0 + .5 * M), c = arc(s1);
+    for (const [p, q, colr] of [[a, b, STEEL], [b, c, GLASS]]) for (let i = 0; i < SEG; i++) P.poly([p[i], p[i + 1], q[i + 1], q[i]], colr, P.ctx.roof(14), null, [x + ux * (s0 + s1) / 2, y, z + uz * (s0 + s1) / 2]);
+  }
+  for (const s of [-ha, ha]) P.poly(arc(s), GLASS, P.ctx.roof(14), null, [x, y + rise * .3, z]);
+}
+
+function clockTower(P, x, z, g) {
+  const w = 2.2 * M, H = 24 * M;
+  P.box(x, z, g - 1 * M, g + H, w, w, 1, 0, BRICK);
+  for (const h of [.3, .62, .9]) P.box(x, z, g + H * h, g + H * h + .6 * M, w + .25 * M, w + .25 * M, 1, 0, CREAM);
+  // clock faces on all four sides
+  for (const [nx, nz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const cx = x + nx * (w + .3 * M), cz = z + nz * (w + .3 * M), cy = g + H * .8;
+    P.box(cx, cz, cy - 1.3 * M, cy + 1.3 * M, nx ? .1 * M : 1.3 * M, nx ? 1.3 * M : .1 * M, 1, 0, WHITE);
+    P.box(cx + nx * .1 * M, cz + nz * .1 * M, cy - .1 * M, cy + 1 * M, nx ? .08 * M : .1 * M, nx ? .1 * M : .08 * M, 1, 0, DARK);
+  }
+  P.box(x, z, g + H, g + H + 3.5 * M, w * .8, w * .8, 1, 0, CREAM);
+  P.cyl(x, z, g + H + 3.5 * M, g + H + 9 * M, w * 1.25, 0, 4, COPPER, P.PLAIN, true, Math.PI / 4);
+}
+
+function signalMast(P, x, z, g) {
+  const H = 22 * M, top = g + H;
+  P.cyl(x, z, g - .5 * M, g + .6 * M, 2.5 * M, 2.5 * M, 8, CONCRETE);
+  P.cyl(x, z, g, top, .35 * M, .18 * M, 8, WHITE);
+  for (const [h, w] of [[.62, 6], [.82, 4]]) P.beam([x - w * M, g + H * h, z], [x + w * M, g + H * h, z], .2 * M, WHITE);
+  // signal flags hoisted on both yardarms
+  const FLAGS = [RED, hex('#f2d22e'), hex('#2f5f9f'), WHITE, hex('#2f8a57')];
+  for (const s of [-1, 1]) for (let k = 0; k < 4; k++) {
+    const fx = x + s * (5.5 - k * .2) * M, fy = g + H * .62 - (k + 1) * 1.4 * M;
+    P.sheet([[fx, fy, z], [fx + s * .1 * M, fy, z + 1 * M], [fx + s * .1 * M, fy + 1 * M, z + 1 * M], [fx, fy + 1 * M, z]], FLAGS[(k + (s > 0 ? 2 : 0)) % FLAGS.length]);
+    P.beam([fx, fy + 1 * M, z], [fx, fy + 1.4 * M, z], .03 * M, DARK);
+  }
+  // radar bar on top
+  P.box(x, z, top, top + .5 * M, 2.4 * M, .25 * M, 1, 0, DARK);
+}
+
+function simulatorHall(P, x, z, g, ux, uz) {
+  P.box(x, z, g - 1 * M, g + 8.4 * M, 14 * M, 9 * M, ux, uz, GLASS, P.PLAIN, { wall: { style: 1, bay: 2.6, floorH: 4.2 } });
+  P.box(x, z, g + 8.4 * M, g + 9 * M, 15.5 * M, 10.5 * M, ux, uz, WHITE, P.PLAIN, { bottom: true });
+  // ship-bridge simulator dome on the roof
+  const rings = [];
+  for (let r = 0; r <= 4; r++) { const ph = r / 4 * Math.PI / 2 * .97, rr = Math.cos(ph) * 5 * M, ring = []; for (let s = 0; s < 12; s++) { const t = s / 12 * Math.PI * 2; ring.push([x + Math.cos(t) * rr, g + 9 * M + Math.sin(ph) * 5 * M, z + Math.sin(t) * rr]); } rings.push(ring); }
+  P.loft(rings, WHITE, P.ctx.roof(14), { caps: true, axis: [x, g + 9 * M, z] });
+}
+
+function curvedFaculty(P, x, z, g) {
+  // an arc of stepped wings around a forecourt, tallest in the middle; (x,z) is the arc's midpoint
+  const R = 45 * M, N = 6, span = Math.PI * .55, mid = -Math.PI / 2, depth = 5.5 * M;
+  const ox = x - Math.cos(mid) * R, oz = z - Math.sin(mid) * R, segL = 2 * R * Math.sin(span / N / 2);
+  for (let k = 0; k < N; k++) {
+    const t = mid - span / 2 + (k + .5) / N * span, cx = ox + Math.cos(t) * R, cz = oz + Math.sin(t) * R;
+    const floors = 4 + Math.round(3 * (1 - Math.abs((k + .5) / N - .5) * 2)), h = floors * 3.6 * M;
+    P.box(cx, cz, g - 1 * M, g + h, segL / 2 + .3 * M, depth, -Math.sin(t), Math.cos(t), k % 2 ? hex('#e4e2dc') : hex('#d2d6d8'), P.PLAIN, { wall: { style: 1, bay: 2.6, floorH: 3.6 } });
+    P.box(cx, cz, g + h, g + h + .5 * M, segL / 2 + .7 * M, depth + .6 * M, -Math.sin(t), Math.cos(t), WHITE, P.PLAIN, { bottom: true });
+  }
+}
+
+function campuses(ctx, nextId) {
+  let n = 0;
+  // Sabancı: glass vault on the Information Center, fly tower on the Performing Arts Center
+  for (const b of namedBuildings(ctx, /Information Center/)) {
+    const f = footprintBox(b.ring), P = painter(ctx, f.x, f.z, b.ground, b.bid);
+    barrelVault(P, f, b.top, Math.min(9, f.hb / M * .45) * M); n++;
+  }
+  for (const b of namedBuildings(ctx, /Gösteri Merkezi/)) {
+    const f = footprintBox(b.ring), P = painter(ctx, f.x, f.z, b.ground, b.bid);
+    P.box(f.x - f.ux * f.ha * .35, f.z - f.uz * f.ha * .35, b.top - 1 * M, b.top + 11 * M, f.ha * .3, f.hb * .55, f.ux, f.uz, CREAM, P.PLAIN, { topColour: hex('#8e9295') });
+    P.box(f.x + f.ux * f.ha * .3, f.z + f.uz * f.ha * .3, b.top, b.top + 1.2 * M, f.ha * .55, f.hb * .9, f.ux, f.uz, BRICK); n++;
+  }
+  {
+    const [x, z] = CAMPUS.sabanci.lakeTower, g = ctx.elev(x, z);
+    clockTower(painter(ctx, x, z, g, nextId()), x, z, g); n++;
+  }
+  // İTÜ Maritime Faculty and Piri Reis University: simulator halls, signal mast, observation tower
+  for (const [sim, ux, uz] of [[CAMPUS.itu.sim, 1, 0], [CAMPUS.piriReis.sim, .8, .6]]) {
+    const [x, z] = sim, g = ctx.elev(x, z);
+    simulatorHall(painter(ctx, x, z, g, nextId()), x, z, g, ux, uz); n++;
+  }
+  {
+    const [x, z] = CAMPUS.itu.mast, g = ctx.elev(x, z);
+    signalMast(painter(ctx, x, z, g, nextId()), x, z, g); n++;
+    const [tx, tz] = CAMPUS.piriReis.tower, tg = ctx.elev(tx, tz);
+    lighthouse(painter(ctx, tx, tz, tg, nextId()), tx, tz, tg, [hex('#1f3f7a'), WHITE]); n++;
+  }
+  // Okan University: curved stepped faculty and twin dormitory slabs
+  {
+    const [x, z] = CAMPUS.okan.arc, g = ctx.elev(x, z);
+    curvedFaculty(painter(ctx, x, z, g, nextId()), x, z, g); n++;
+    const [dx, dz] = CAMPUS.okan.dorm, dg = ctx.elev(dx, dz), P = painter(ctx, dx, dz, dg, nextId());
+    for (const s of [-1, 1]) P.box(dx, dz + s * 11 * M, dg - 1 * M, dg + 6 * 3 * M, 18 * M, 5.5 * M, 1, 0, s < 0 ? hex('#e3cfa6') : hex('#d6b4a4'), P.PLAIN, { wall: { style: 0, bay: 3.1, floorH: 3 } });
+    n++;
+  }
+  return n;
+}
+
 /* -------------------------------------------------------------- entry */
 export function buildLandmarks(ctx) {
   let id = ctx.firstId;
@@ -523,6 +664,7 @@ export function buildLandmarks(ctx) {
   stats.shipyardCranes = shipyards(ctx, nextId);
   stats.marinaPieces = marina(ctx, nextId);
   stats.circuitPieces = istanbulPark(ctx, nextId);
+  stats.campusPieces = campuses(ctx, nextId);
   return stats;
 }
 
