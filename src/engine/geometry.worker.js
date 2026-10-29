@@ -194,13 +194,13 @@ function build({ osm, terrain, ground, options }) {
 
   /* ------------------------------------------------ urban topology rasters */
   const tTopo = performance.now();
-  const { isNearRoad, rings, holesOf, partyWall } = urbanTopology(osm.roads, osm.buildings, terrain.bounds);
+  const { isNearRoad, rings, holesOf, partyWall, dup } = urbanTopology(osm.roads, osm.buildings, terrain.bounds);
   stats.topologyMs = Math.round(performance.now() - tTopo);
   for (let bid = 0; bid < total; bid++) {
     if (bid % 2000 === 0) progress('buildings', bid / total);
     const b = osm.buildings[bid];
     const ring = rings[bid], holes = holesOf[bid];
-    if (ring.length < 6) continue;
+    if (ring.length < 6 || dup[bid]) { stats.duplicates = (stats.duplicates || 0) + (dup[bid] ? 1 : 0); continue; }
     let sa = signedArea(ring);
     const area = Math.abs(sa) * 1e6;
     if (area < 6) continue;
@@ -653,17 +653,26 @@ function urbanTopology(roads, buildings, [bx0, bz0, bx1, bz1]) {
     const hs = Array.isArray(b[8]) ? b[8].map(cleanRing).filter(r => r.length >= 6) : null;
     holesOf[bid] = hs && hs.length ? hs : null;
   }
+  // duplicated footprints (same outline mapped twice) would z-fight: keep the first one
+  const dup = new Uint8Array(total), seen = new Map();
+  for (let bid = 0; bid < total; bid++) {
+    const r = rings[bid]; if (r.length < 6) continue;
+    let cx = 0, cz = 0; for (let i = 0; i < r.length; i += 2) { cx += r[i]; cz += r[i + 1]; } cx /= r.length / 2; cz /= r.length / 2;
+    const a = Math.abs(signedArea(r)), key = Math.round(cx / .0015) * 100003 + Math.round(cz / .0015), other = seen.get(key);
+    if (other !== undefined && Math.abs(a - other) < .2 * Math.max(a, other)) dup[bid] = 1; else seen.set(key, a);
+  }
   // party-wall spatial hash: building edges longer than 2.5 m, sampled every metre into 2 m cells.
   // (cell, edge) pairs are bucketed by a counting pass into a CSR list indexed by an open-addressing table.
   const EC = .002, EW = Math.ceil((bx1 - bx0) / EC) + 1;
   const edges = new Buf(Float32Array, 1 << 18), eOwn = new Buf(Int32Array, 1 << 16), pk = new Buf(Int32Array, 1 << 19), pe = new Buf(Int32Array, 1 << 19);
   const ekey = (x, z) => Math.floor((z - bz0) / EC) * EW + Math.floor((x - bx0) / EC);
   for (let bid = 0; bid < total; bid++) {
-    const r = rings[bid], n = r.length / 2; if (n < 3) continue;
+    const r = rings[bid], n = r.length / 2; if (n < 3 || dup[bid]) continue;
+    const ccw = signedArea(r) >= 0; // edges are stored so that (dz, -dx) is their outward normal
     for (let i = 0; i < n; i++) {
       const j = (i + 1) % n, ax = r[i * 2], az = r[i * 2 + 1], bx = r[j * 2], bz = r[j * 2 + 1], len = Math.hypot(bx - ax, bz - az);
       if (len < .0025) continue;
-      const e = eOwn.n; eOwn.push1(bid); edges.push4(ax, az, bx, bz);
+      const e = eOwn.n; eOwn.push1(bid); if (ccw) edges.push4(ax, az, bx, bz); else edges.push4(bx, bz, ax, az);
       const s = Math.ceil(len / .001); let last = -1;
       for (let q = 0; q <= s; q++) {
         const key = ekey(ax + (bx - ax) * q / s, az + (bz - az) * q / s);
@@ -692,7 +701,8 @@ function urbanTopology(roads, buildings, [bx0, bz0, bx1, bz1]) {
         for (let k = hStart[slot], k1 = hEnd[slot]; k < k1; k++) {
           const e = cellEdges[k]; if (EO[e] === bid) continue;
           const o = e * 4, ex = EA[o + 2] - EA[o], ez = EA[o + 3] - EA[o + 1], el = Math.hypot(ex, ez);
-          if (Math.abs((ex * ux + ez * uz) / el) < .85) continue;
+          // a shared wall runs back to back: parallel, with opposite outward normals
+          if ((ez * nx - ex * nz) / el > -.85) continue;
           let tt = ((px - EA[o]) * ex + (pz - EA[o + 1]) * ez) / (el * el); tt = tt < 0 ? 0 : tt > 1 ? 1 : tt;
           const qx = EA[o] + ex * tt - px, qz = EA[o + 1] + ez * tt - pz;
           if (qx * qx + qz * qz < .0014 * .0014 && qx * nx + qz * nz > -.0004) { hit = true; break; }
@@ -702,7 +712,7 @@ function urbanTopology(roads, buildings, [bx0, bz0, bx1, bz1]) {
     }
     return false;
   }
-  return { isNearRoad, rings, holesOf, partyWall };
+  return { isNearRoad, rings, holesOf, partyWall, dup };
 }
 
 function rev(a) { const o = []; for (let i = a.length - 2; i >= 0; i -= 2) o.push(a[i], a[i + 1]); return o; }
