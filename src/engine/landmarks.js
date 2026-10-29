@@ -385,6 +385,136 @@ function marina(ctx, nextId) {
   return n;
 }
 
+/* ----------------------------------------- 6.3 Intercity İstanbul Park (F1) */
+// The OSM footprints of the main grandstand (south of the start/finish
+// straight) and the pit/paddock building (north of it) are already extruded
+// by the worker as plain blocks; these pieces dress them as the real thing.
+const F1 = {
+  // grandstand footprint: rear edge A and front edge B (front faces the straight)
+  standA: [[4.4996, -6.8167], [4.8869, -6.8950]],
+  standB: [[4.4931, -6.8489], [4.8804, -6.9272]],
+  podium: 15 * M, // height the worker gives this 8,800 m² block (3 industrial floors)
+  // pit building: track-facing edge and paddock-facing edge
+  pitFront: [[4.5240, -6.9136], [4.8308, -6.9747]],
+  pitBack: [[4.5206, -6.9383], [4.8236, -6.9997]],
+  pitHeight: 15 * M,
+  vip: [[4.600, -6.989, 34], [4.680, -7.006, 42], [4.760, -7.022, 30]]
+};
+const SEATS = [hex('#c0392b'), hex('#d8d8d2'), hex('#2c5d9c'), hex('#3a3d40')];
+
+/** Polygonal prism with facade-mapped walls (bays across, floors up) and a flat roof. */
+function facadePrism(P, x, z, y0, y1, r, sides, colr, style, bay, floorH, phase = 0) {
+  const pts = [];
+  for (let s = 0; s < sides; s++) { const t = phase + s / sides * Math.PI * 2; pts.push([x + Math.cos(t) * r, z + Math.sin(t) * r]); }
+  const fl = (y1 - y0) / M / floorH;
+  for (let s = 0; s < sides; s++) {
+    const a = pts[s], b = pts[(s + 1) % sides], bays = Math.max(1, Math.round(Math.hypot(b[0] - a[0], b[1] - a[1]) / M / bay));
+    P.poly([[a[0], y0, a[1]], [b[0], y0, b[1]], [b[0], y1, b[1]], [a[0], y1, a[1]]], colr, P.ctx.wall(style), [[0, 0], [bays, 0], [bays, fl], [0, fl]], [x, (y0 + y1) / 2, z]);
+  }
+  P.poly(pts.map(p => [p[0], y1, p[1]]), colr, P.FLAT, pts.map(p => [p[0] / M, p[1] / M]), [x, y0, z]);
+}
+
+function grandstand(P, ctx) {
+  const [A0, A1] = F1.standA, [B0, B1] = F1.standB;
+  let ux = A1[0] - A0[0], uz = A1[1] - A0[1]; const L = Math.hypot(ux, uz); ux /= L; uz /= L;
+  // f points from the rear edge towards the straight
+  let fx = B0[0] - A0[0], fz = B0[1] - A0[1]; const D = fx * -uz + fz * ux; fx = -uz * Math.sign(D); fz = ux * Math.sign(D);
+  const depth = Math.abs(D);
+  const ring = [A0, A1, B1, B0];
+  let gMin = Infinity, gMax = -Infinity; for (const [x, z] of ring) { const g = ctx.elev(x, z); gMin = Math.min(gMin, g); gMax = Math.max(gMax, g); }
+  const top = gMax + .0003 + F1.podium; // on top of the podium whichever base rule the worker uses
+  const at = (s, d, y) => [A0[0] + ux * s + fx * d, y, A0[1] + uz * s + fz * d];
+  // treads face up, risers face the straight (+d)
+  const strip = (d0, y0, d1, y1, colr) => P.poly([at(0, d0, y0), at(L, d0, y0), at(L, d1, y1), at(0, d1, y1)], colr, P.PLAIN, null,
+    d0 === d1 ? at(L / 2, d0 - 1 * M, (y0 + y1) / 2) : at(L / 2, (d0 + d1) / 2, Math.min(y0, y1) - 1 * M));
+  const endCaps = (d0, d1, yb, yt) => { for (const s of [0, L]) P.sheet([at(s, d0, yb), at(s, d1, yb), at(s, d1, yt), at(s, d0, yt)], CONCRETE); };
+  // upper tier on the podium: 12 rows climbing from the front edge to the rear spine
+  const ROWS = 12, rowD = (depth - 3 * M) / ROWS, rise = .95 * M;
+  let y = top + 1.2 * M;
+  strip(depth, top, depth, y, CONCRETE); // front parapet
+  for (let k = 0; k < ROWS; k++) {
+    const d0 = depth - k * rowD, d1 = d0 - rowD;
+    strip(d0, y, d1, y, SEATS[(k >> 1) % SEATS.length]);
+    endCaps(d0, d1, top, y);
+    strip(d1, y, d1, y + rise, CONCRETE);
+    y += rise;
+  }
+  const spineY = y + 3 * M;
+  P.box(...at(L / 2, 1.5 * M, 0).filter((_, i) => i !== 1), top, spineY, L / 2, 1.5 * M, ux, uz, WHITE);
+  // lower tier in front of the podium, down towards the track wall
+  const front = 11 * M; let yl = gMax + 1 * M;
+  for (let k = 0; k < 8; k++) {
+    const d0 = depth + front - k * front / 8, d1 = d0 - front / 8;
+    strip(d0, yl, d1, yl, SEATS[(k + 1) % SEATS.length]);
+    endCaps(d0, d1, gMin - 1 * M, yl);
+    strip(d1, yl, d1, yl + 1.1 * M, CONCRETE);
+    yl += 1.1 * M;
+  }
+  strip(depth + front, gMin - 1 * M, depth + front, gMax + 1 * M, CONCRETE);
+  // inclined steel masts behind the spine, 28 m above it, holding the tensile roof
+  const N = 10, roofFront = depth + 6 * M, roofY0 = spineY + 1 * M, roofY1 = top + 13 * M, mastTop = spineY + 28 * M;
+  const mastAt = k => (k + .5) / N * L;
+  for (let k = 0; k < N; k++) {
+    const s = mastAt(k), foot = at(s, -4 * M, gMin - .5 * M), head = at(s, -10 * M, mastTop);
+    P.beam(foot, head, 1.3 * M, WHITE);
+    P.beam(head, at(s, -30 * M, gMin), .2 * M, STEEL); // backstay
+    for (const t of [.35, .7]) P.beam(head, at(s, roofFront * t + (1 - t) * 0, roofY0 + (roofY1 - roofY0) * t), .15 * M, STEEL);
+    P.beam(head, at(s, roofFront, roofY1), .15 * M, STEEL);
+    P.cyl(...at(s, -10 * M, 0).filter((_, i) => i !== 1), mastTop, mastTop + 1.5 * M, .5 * M, 0, 6, RED);
+  }
+  // white membrane: high at each mast line, sagging between them
+  const MEM = hex('#f2f2ee');
+  for (let k = 0; k <= N; k++) {
+    const s0 = k === 0 ? 0 : mastAt(k - 1), s1 = k === N ? L : mastAt(k), sm = (s0 + s1) / 2, sag = 1.6 * M;
+    for (const [a, b, ya, yb] of [[s0, sm, 0, sag], [sm, s1, sag, 0]]) {
+      P.sheet([at(a, 0, roofY0 - ya * .3), at(b, 0, roofY0 - yb * .3), at(b, roofFront, roofY1 - yb), at(a, roofFront, roofY1 - ya)], MEM);
+    }
+  }
+}
+
+function pitBuilding(P, ctx) {
+  const [F0, F1e] = F1.pitFront, [K0] = F1.pitBack;
+  let ux = F1e[0] - F0[0], uz = F1e[1] - F0[1]; const L = Math.hypot(ux, uz); ux /= L; uz /= L;
+  // outward normal of the track-facing wall (away from the paddock edge)
+  let nx = -uz, nz = ux; if ((K0[0] - F0[0]) * nx + (K0[1] - F0[1]) * nz > 0) { nx = -nx; nz = -nz; }
+  let g = -Infinity; for (const [x, z] of [F0, F1e, ...F1.pitBack]) g = Math.max(g, ctx.elev(x, z));
+  const base = g + .0003, top = base + F1.pitHeight;
+  const at = (s, d, y) => [F0[0] + ux * s + nx * d, y, F0[1] + uz * s + nz * d];
+  const xz = (s, d) => [F0[0] + ux * s + nx * d, F0[1] + uz * s + nz * d];
+  // 36 garage boxes: dark roller doors framed by team-coloured fascia
+  const N = 36, bayW = L / N, TEAM = [hex('#c0392b'), hex('#1f3f7a'), hex('#e07a22'), hex('#2f8a57'), hex('#d8d8d2'), hex('#16a3c4')];
+  for (let k = 0; k < N; k++) {
+    const s = (k + .5) * bayW;
+    P.box(...xz(s, .15 * M), base, base + 5 * M, bayW / 2 - .6 * M, .15 * M, ux, uz, DARK);
+    P.box(...xz(s, .2 * M), base + 5 * M, base + 6.2 * M, bayW / 2 - .2 * M, .2 * M, ux, uz, TEAM[(k >> 1) % TEAM.length]);
+  }
+  // pit wall along the pit lane
+  P.box(...xz(L / 2, 14 * M), base - 1 * M, base + 1.1 * M, L / 2, .4 * M, ux, uz, WHITE);
+  // upper glass hospitality terrace cantilevered over the pit lane
+  P.box(...xz(L / 2, 2.5 * M), top - 8 * M, top - 7.6 * M, L / 2, 2.5 * M, ux, uz, WHITE, P.PLAIN, { bottom: true });
+  P.box(...xz(L / 2, 1.8 * M), top - 7.6 * M, top - 1 * M, L / 2, 1.8 * M, ux, uz, hex('#b9c7cf'), P.PLAIN, { wall: { style: 1, bay: 2.6, floorH: 3.3 } });
+  for (let k = 0; k <= 18; k++) P.beam(at(k / 18 * L, 5 * M, top - 7.6 * M), at(k / 18 * L, 5 * M, top - 6.6 * M), .1 * M, STEEL);
+  P.beam(at(0, 5 * M, top - 6.6 * M), at(L, 5 * M, top - 6.6 * M), .12 * M, STEEL); // balustrade rail
+  // thin roof blade overhanging the terrace
+  P.box(...xz(L / 2, 3 * M), top, top + .6 * M, L / 2 + 2 * M, 7 * M, ux, uz, WHITE, P.PLAIN, { bottom: true });
+}
+
+function istanbulPark(ctx, nextId) {
+  const [cx, cz] = F1.standB[0];
+  const g0 = ctx.elev(cx, cz);
+  const P = painter(ctx, cx, cz, g0, nextId());
+  grandstand(P, ctx);
+  pitBuilding(P, ctx);
+  for (const [x, z, h] of F1.vip) {
+    const g = ctx.elev(x, z), Q = painter(ctx, x, z, g, nextId());
+    facadePrism(Q, x, z, g - 1 * M, g + h * M, 9 * M, 6, hex('#a9bcc6'), 1, 2.6, 3.6);
+    // steel crown and a slimmer sky-lounge drum
+    facadePrism(Q, x, z, g + h * M, g + (h + 4) * M, 6.5 * M, 6, hex('#d8dee2'), 1, 2.4, 4, Math.PI / 6);
+    Q.cyl(x, z, g + (h + 4) * M, g + (h + 5.2) * M, 10 * M, 10 * M, 6, WHITE);
+  }
+  return 3 + F1.vip.length;
+}
+
 /* -------------------------------------------------------------- entry */
 export function buildLandmarks(ctx) {
   let id = ctx.firstId;
@@ -392,6 +522,7 @@ export function buildLandmarks(ctx) {
   const stats = {};
   stats.shipyardCranes = shipyards(ctx, nextId);
   stats.marinaPieces = marina(ctx, nextId);
+  stats.circuitPieces = istanbulPark(ctx, nextId);
   return stats;
 }
 
