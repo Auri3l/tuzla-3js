@@ -23,7 +23,7 @@ def font_data(match):
     filename = match.group(1)
     data = (ROOT / 'public' / 'fonts' / filename).read_bytes()
     return 'url(data:font/ttf;base64,' + base64.b64encode(data).decode('ascii') + ')'
-css, n_fonts = re.subn(r'url\([\"\']?/fonts/([^\)\"\']+)[\"\']?\)', font_data, css)
+css, n_fonts = re.subn(r'url\([\"\']?(?:\.\./|\./|/)fonts/([^\)\"\']+)[\"\']?\)', font_data, css)
 if n_fonts < 4:
     raise SystemExit(f'Expected four local font references; found {n_fonts}')
 
