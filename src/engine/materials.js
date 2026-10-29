@@ -157,12 +157,48 @@ uniform float uHScale;
 varying vec4 vInfo;
 varying vec2 vFacade;
 varying vec3 vWPos;
+varying vec3 vWNorm;
 `;
 const BUILDING_BEGIN = /* glsl */`
 vec3 transformed = vec3(position);
 transformed.y += info.z * (uHScale - 1.0);
 vInfo = info; vFacade = uv;
 vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+vWNorm = normalize(mat3(modelMatrix) * normal);
+`;
+
+// Analytical interior mapping: a ray-box room behind every window bay.
+// p = entry point in the bay (x, y in 0..1), d = view ray in room space (z into the room).
+const INTERIOR = /* glsl */`
+vec3 tzRoom(vec2 p, vec3 d, float depth, float rs, float shop, out float lamp) {
+  vec3 o = vec3(p, 0.0);
+  float tx = ((d.x > 0.0 ? 1.0 : 0.0) - o.x) / (abs(d.x) > 1e-4 ? d.x : 1e-4);
+  float ty = ((d.y > 0.0 ? 1.0 : 0.0) - o.y) / (abs(d.y) > 1e-4 ? d.y : 1e-4);
+  float tz = depth / max(d.z, 1e-4);
+  float t = min(min(tx, ty), tz);
+  vec3 q = o + d * t;
+  vec3 wallC = mix(vec3(.78, .72, .62), vec3(.86, .85, .8), step(.4, rs));
+  wallC = mix(wallC, vec3(.62, .7, .74), step(.85, rs));            // the odd pale-blue room
+  if (shop > .5) wallC = vec3(.9, .9, .88);
+  vec3 floorC = mix(vec3(.42, .28, .18), vec3(.55, .5, .46), step(.6, fract(rs * 7.1)));
+  vec3 col; lamp = 0.0;
+  if (t == tz) {
+    col = wallC * .92;
+    // furniture silhouettes against the back wall: sofa / cabinet / shelves
+    float f = fract(rs * 13.3);
+    if (q.y < .3 && abs(q.x - (.25 + .5 * f)) < .22) col = mix(vec3(.25, .22, .2), vec3(.45, .35, .3), fract(rs * 3.7));
+    if (shop > .5 && q.y > .2 && q.y < .75 && fract(q.x * 5.0) < .8) col = mix(vec3(.7, .4, .3), vec3(.3, .45, .6), fract(floor(q.x * 5.0) * .37 + rs)); // shelves
+    if (q.y > .45 && q.y < .7 && abs(q.x - (.7 - .4 * f)) < .1 && shop < .5) col = vec3(.35, .3, .26);                       // picture frame
+  } else if (t == ty) {
+    if (d.y > 0.0) {
+      col = vec3(.9, .89, .86);
+      float r = length(vec2(q.x - .5, (q.z - depth * .5) / depth));
+      lamp = 1.0 - smoothstep(.05, .12, r);
+    } else col = floorC;
+  } else col = wallC * .82;                                            // side partitions
+  // depth cue: rooms darken toward the back
+  return col * mix(1.0, .55, clamp(q.z / depth, 0.0, 1.0));
+}
 `;
 
 export function buildingMaterial() {
@@ -177,8 +213,9 @@ export function buildingMaterial() {
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>
 uniform sampler2D uFacade; uniform sampler2D uMask; uniform float uNight; uniform float uSelected; uniform float uTime;
-varying vec4 vInfo; varying vec2 vFacade; varying vec3 vWPos;
-${NOISE}`)
+varying vec4 vInfo; varying vec2 vFacade; varying vec3 vWPos; varying vec3 vWNorm;
+${NOISE}
+${INTERIOR}`)
       .replace('#include <color_fragment>', /* glsl */`
 float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
 {
@@ -246,7 +283,31 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
     float lit = step(h, mix(.12, .4, fract(seed * 13.7)) * (fl < .5 ? 1.4 : 1.0));
     vec3 warm = mix(vec3(1.0, .72, .42), vec3(1.0, .88, .7), fract(h * 31.0));
     if (fract(h * 17.0) < .12) warm = vec3(.72, .85, 1.0);
-    tzGlow = warm * lit * smoothstep(.3, .9, tzGlass) * uNight * (.45 + .5 * fract(h * 5.3));
+    float glowK = 1.0;
+    // interior rooms behind the glass, faded out beyond 1.8 km
+    vec3 toFrag = vWPos - cameraPosition; float camDist = length(toFrag);
+    float near = (1.0 - smoothstep(1.2, 1.8, camDist)) * step(.25, tzGlass);
+    vec3 N = normalize(vWNorm), T = normalize(cross(vec3(0.0, 1.0, 0.0), N));
+    // orient T with the facade's u axis so side walls parallax the right way (derivatives taken in uniform flow)
+    float su = dot(dFdx(vWPos), T) * dFdx(vFacade.x) + dot(dFdy(vWPos), T) * dFdy(vFacade.x);
+    if (su < 0.0) T = -T;
+    if (near > 0.0) {
+      vec3 V = toFrag / camDist;
+      vec3 d = normalize(vec3(dot(V, T), V.y, -dot(V, N)));
+      float rs = tzHash3(vec3(bay, fl, id + 7.0)), lamp;
+      float shop = row == 0.0 && wallRole < .5 ? 1.0 : 0.0;
+      vec3 room = tzRoom(cell, d, shop > .5 ? 1.4 : .65, rs, shop, lamp);
+      // curtains or blinds just behind the pane
+      float cur = fract(rs * 5.3);
+      if (shop < .5 && cur < .45 && abs(cell.x - .5) > .2) room = mix(room, mix(vec3(.85, .8, .7), vec3(.6, .45, .38), step(.25, cur)), .85);
+      else if (shop < .5 && cur > .8 && cell.y > .55) room = mix(room, vec3(.82, .82, .78) * (.85 + .15 * step(.5, fract(cell.y * 18.0))), .9);
+      float fres = pow(1.0 - max(0.0, dot(-V, N)), 3.0);
+      vec3 inside = room * mix(.32, .06, uNight);                  // seen from outside: dim by day
+      albedo = mix(albedo, mix(inside, albedo, fres), near * tzGlass * .9);
+      // at night lit rooms show their ceiling lamp, walls and furniture
+      glowK = mix(1.0, (.55 + 1.6 * lamp) * dot(room, vec3(.4)) * 1.6, near);
+    }
+    tzGlow = warm * lit * smoothstep(.3, .9, tzGlass) * uNight * (.45 + .5 * fract(h * 5.3)) * glowK;
     albedo = mix(albedo, albedo * .45, tzGlass * uNight);
   } else {
     // roofs
