@@ -140,6 +140,8 @@ const COASTAL_WALLS = ['#efe2c4', '#e8cf9e', '#f3ece0', '#e2b98f', '#ead9bd', '#
 const VILLA_MAH = new Set(['Tepeören', 'Akfırat', 'Orhanlı', 'Fatih', 'Anadolu', 'Mescit']);
 const VILLA_WALLS = ['#f3efe6', '#efe6d2', '#e9dcc3', '#f6f3ec', '#e4d3b8', '#ead8bd'].map(hex);
 const VILLA_TILES = ['#9c4e38', '#844232', '#5a5652'].map(hex);
+// shop awning canvas: oxblood, navy, bottle green, ochre, orange, cream
+const AWNINGS = ['#8e2b22', '#2c4a6e', '#2f5a3a', '#b8872e', '#c4602a', '#e8dfc8', '#7a2430'].map(hex);
 // mosques: cut limestone (küfeki)
 const KUFEKI = ['#e6dfd1', '#ded5c3', '#d6cbb8'].map(hex);
 const DENSE_MAH = new Set(['Aydıntepe', 'İçmeler', 'Yayla', 'Şifa', 'Mimar Sinan', 'Orta', 'Aydınlı', 'Evliya Çelebi']);
@@ -450,6 +452,43 @@ function build({ osm, terrain, ground, options }) {
     // courtyard walls face into the hole, i.e. against the hole ring's own outward side
     if (holes) for (const h of holes) walls(h, signedArea(h) < 0, 2);
 
+    // street life (Phase 7.1): sloped canvas tente over ground-floor shop bays, cantilevered entrance canopy on civic blocks
+    if (!floating) {
+      // awnings on the high-street mahalles (coastal centre and dense apartment districts) and on retail anywhere
+      const shopfront = (arche === 1 || dense) && (style === 0 || style === 4 || arche === 1 && style === 3) || style === 6;
+      let ci = -1, cl = 0;
+      for (let i = 0; i < n; i++) {
+        if (roles[i] !== 0) continue;
+        const j = (i + 1) % n, ax = ring[i * 2], az = ring[i * 2 + 1], dx = ring[j * 2] - ax, dz = ring[j * 2 + 1] - az, len = Math.hypot(dx, dz);
+        if (len > cl) { cl = len; ci = i; }
+        if (!shopfront || len < .004) continue;
+        const ex = dx / len, ez = dz / len, nx = positive ? ez : -ez, nz = positive ? -ex : ex;
+        const bays = Math.max(1, Math.round(len * 1000 / bay)), w = len / bays * .43;
+        const yt = base + (style === 6 ? .0031 : .0028), P = .0011, yf = yt - .0005, yv = yf - .00022;
+        for (let k = 0; k < bays; k++) {
+          const hk = hash2(bid * 7.13 + i, k * 3.7);
+          if (hk > .45) continue;
+          const t = (k + .5) / bays * len, px = ax + ex * t + nx * .00004, pz = az + ez * t + nz * .00004;
+          const A = [px - ex * w, yt, pz - ez * w], B = [px + ex * w, yt, pz + ez * w];
+          const F = [B[0] + nx * P, yf, B[2] + nz * P], E = [A[0] + nx * P, yf, A[2] + nz * P];
+          const sl = Math.hypot(P, .0005), up = [nx * .0005 / sl, P / sl, nz * .0005 / sl], colr = pick(AWNINGS, hk / .45);
+          quadN(c, [A, B, F, E], up, [0, 0, 1, 0, 1, 1, 0, 1], colr, bid, 125, base, iw);
+          quadN(c, [B, A, E, F], [-up[0], -up[1], -up[2]], [1, 0, 0, 0, 0, 1, 1, 1], colr, bid, 125, base, iw);
+          quadN(c, [E, F, [F[0], yv, F[2]], [E[0], yv, E[2]]], [nx, 0, nz], [0, 1, 1, 1, 1, 1.2, 0, 1.2], colr, bid, 125, base, iw);
+          stats.awnings = (stats.awnings || 0) + 1;
+        }
+      }
+      if ((style === 1 || style === 5) && !isMosque && ci >= 0 && cl > .006) {
+        const j = (ci + 1) % n, ax = ring[ci * 2], az = ring[ci * 2 + 1], ex = (ring[j * 2] - ax) / cl, ez = (ring[j * 2 + 1] - az) / cl;
+        const nx = positive ? ez : -ez, nz = positive ? -ex : ex, D = .0013, hl = Math.min(cl * .22, .0045);
+        const mx = ax + ex * cl / 2 + nx * D, mz = az + ez * cl / 2 + nz * D, y0 = base + .0033, y1 = y0 + .00025, canC = [.82, .83, .82];
+        box(c, mx, mz, ex, ez, hl, D, y0, y1, canC, bid, 121, base, iw);
+        const C = [[-hl, -D], [hl, -D], [hl, D], [-hl, D]].map(([a, b2]) => [mx + ex * a - ez * b2, y0, mz + ez * a + ex * b2]);
+        quadN(c, C, [0, -1, 0], [0, 0, 1, 0, 1, 1, 0, 1], canC, bid, 117, base, iw); // soffit
+        stats.canopies = (stats.canopies || 0) + 1;
+      }
+    }
+
     // 3D balcony stacks (wallRole 4 in info.y) on street fronts and long side walls of apartments:
     // one box per stack from the first floor slab to just under the roof, never on blind party walls
     if ((style === 0 || style === 4) && floors >= 2 && area >= 75 && !floating) {
@@ -485,7 +524,7 @@ function build({ osm, terrain, ground, options }) {
 
     // roof
     // >= 100 tells the shader this is a roof: 110 flat, 111 hipped, 112 pyramid, 113 metal, 114 dome, 115 minaret,
-    // 116 gabled, 117 eave soffit / fascia, 118 parapet coping
+    // 116 gabled, 117 eave soffit / fascia, 118 parapet coping; 119-123 rooftop details, 124 alem, 125 awning canvas
     const roofStyle = roofType === 3 ? 116 : 110 + roofType;
     const EAVE = arche === 5 ? .00055 : .0004, FASCIA = .00012, PITCH = arche === 5 ? .75 : 1; // villas: generous saçak, low slope
     const T = (q, y = top, rel = hKm) => [q[0], y, q[1], rel];
