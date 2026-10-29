@@ -172,7 +172,8 @@ export async function createTuzla({ canvas, container, places, quality = 'medium
     g.setAttribute('info', new THREE.BufferAttribute(c.info, 4));
     g.setIndex(new THREE.BufferAttribute(c.index, 1));
     g.computeBoundingBox(); g.boundingBox.max.y += .2; g.computeBoundingSphere(); g.boundingSphere.radius += .15;
-    const m = new THREE.Mesh(g, bMat); m.customDepthMaterial = bDepth; m.castShadow = m.receiveShadow = true; m.layers.enable(1);
+    const m = new THREE.Mesh(g, bMat); m.customDepthMaterial = bDepth; m.castShadow = m.receiveShadow = true;
+    m.userData.center = g.boundingSphere.center.clone(); m.userData.radius = g.boundingSphere.radius;
     buildings.add(m);
   }
   scene.add(buildings);
@@ -275,9 +276,14 @@ export async function createTuzla({ canvas, container, places, quality = 'medium
   controls.addEventListener('start', () => { animation = null; });
 
   /* ---- picking */
-  const pickTarget = new THREE.WebGLRenderTarget(1, 1), pickBuf = new Uint8Array(4);
+  const pickTarget = new THREE.WebGLRenderTarget(1, 1), pickBuf = new Uint8Array(4), pickRay = new THREE.Raycaster(), pickNdc = new THREE.Vector2();
   function pickAt(clientX, clientY) {
-    const rect = canvas.getBoundingClientRect(), x = clientX - rect.left, y = clientY - rect.top, pr = renderer.getPixelRatio();
+    const rect = canvas.getBoundingClientRect(), x = clientX - rect.left, y = clientY - rect.top;
+    // only the chunks whose bounding sphere the cursor ray crosses go into the pick pass
+    pickNdc.set(x / rect.width * 2 - 1, 1 - y / rect.height * 2); pickRay.setFromCamera(pickNdc, camera);
+    const hits = [];
+    for (const m of buildings.children) if (m.visible && pickRay.ray.intersectsSphere(m.geometry.boundingSphere)) { m.layers.enable(1); hits.push(m); }
+    if (!hits.length) return -1;
     camera.setViewOffset(width, height, x, y, 1, 1);
     const oldMask = camera.layers.mask, oldBg = scene.background, oldFog = scene.fog;
     camera.layers.set(1); scene.overrideMaterial = bPick; scene.background = null; scene.fog = null;
@@ -285,13 +291,13 @@ export async function createTuzla({ canvas, container, places, quality = 'medium
     renderer.readRenderTargetPixels(pickTarget, 0, 0, 1, 1, pickBuf);
     renderer.setRenderTarget(null); scene.overrideMaterial = null; camera.layers.mask = oldMask; scene.background = oldBg; scene.fog = oldFog;
     camera.clearViewOffset(); needsRender = true;
+    for (const m of hits) m.layers.disable(1);
     const id = pickBuf[0] + pickBuf[1] * 256 + pickBuf[2] * 65536 - 1;
-    void pr;
     return id >= 0 && id * 12 < meta.length && meta[id * 12 + 2] > 0 ? id : -1;
   }
   function buildingInfo(id) {
     const m = id * 12, [lat, lon] = toLatLon(meta[m], meta[m + 1]);
-    return { id, name: names[id] || '', lat, lon, height: meta[m + 2], known: meta[m + 3], floors: meta[m + 4], area: meta[m + 5], ground: meta[m + 6] * 1000 / TERRAIN_SCALE, style: meta[m + 7], roof: meta[m + 8], kind: meta[m + 9], industrial: meta[m + 10] > 0 };
+    return { id, name: names[id] || '', lat, lon, height: meta[m + 2], known: meta[m + 3], floors: meta[m + 4], area: meta[m + 5], ground: meta[m + 6] * 1000 / TERRAIN_SCALE, style: THREE.MathUtils.clamp(meta[m + 7] | 0, 0, 7), roof: THREE.MathUtils.clamp(meta[m + 8] | 0, 0, 3), roofType: THREE.MathUtils.clamp(meta[m + 8] | 0, 0, 3), kind: meta[m + 9], industrial: meta[m + 10] > 0 };
   }
   function select(id, focus = false) {
     shared.uSelected.value = id; needsRender = true;
@@ -462,6 +468,12 @@ export async function createTuzla({ canvas, container, places, quality = 'medium
     sky.follow(camera);
     // level of detail by distance
     const d = dist;
+    // per-chunk distance culling, and only chunks near the shadow camera feed the shadow pass
+    const bFar = scene.fog.far + 4, sFar = Math.min(16, dist * 1.1 + 2.5);
+    for (const m of buildings.children) {
+      const r = m.userData.center.distanceTo(focus) - m.userData.radius;
+      m.visible = layerOn.buildings && r < bFar; m.castShadow = Q.shadow > 0 && r < sFar;
+    }
     trees.visible = layerOn.trees && d < 14;
     if (trees.visible) for (const m of trees.children) m.visible = m.userData.center.distanceTo(tmp.set(focus.x, 0, focus.z)) < Math.max(3.4, d * 1.4);
     traffic.group.visible = layerOn.traffic && d < 7;
