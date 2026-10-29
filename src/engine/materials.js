@@ -340,7 +340,20 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
       }
     }
     // OSB halls (Phase 4.4): corporate fascia band under the roof edge, truck docks on big warehouses
-    if (arche > 5.5 && wallRole < 2.5 && vFacade.y > 0.0) {
+    bool mosqueW = arche > 5.5 && arche < 6.5 && style > 4.5 && style < 5.5;
+    if (mosqueW && wallRole < 2.5 && vFacade.y > 0.0 && vFacade.y < floors + .02) {
+      // mosque hall: cut-stone ashlar with round-arched windows in a dressed-stone surround
+      vec2 q = vec2(cell.x - .5, cell.y - .62);
+      float arch = q.y > 0.0 ? length(q * vec2(1.0, 1.25)) : abs(q.x);
+      bool opn = arch < .19 && cell.y > .14, sur = arch < .24 && cell.y > .1;
+      float course = floor(vFacade.y * 4.5 / .45), fwc = fwidth(vFacade.y * 10.0);
+      float jn = 1.0 - smoothstep(.0, .06 + fwc, fract(vFacade.y * 4.5 / .45));
+      tex = vec3(.97) * (1.0 - .12 * jn * clamp(1.0 - fwc, 0.0, 1.0)); msk = vec3(1.0, 0.0, .5 - .15 * jn);
+      if (sur) { tex = vec3(.9, .86, .78); msk = vec3(.4, 0.0, .72); }
+      if (opn) { float mu = step(abs(q.x), .012) + step(abs(cell.y - .45), .01); tex = mix(vec3(.24, .3, .33), vec3(.85), clamp(mu, 0.0, 1.0)); msk = vec3(0.0, 1.0 - clamp(mu, 0.0, 1.0), .3); }
+      row = 1.0;
+    }
+    if (arche > 5.5 && !mosqueW && wallRole < 2.5 && vFacade.y > 0.0) {
       float ak = fract(seed * 4.3);
       vec3 acc = ak < .25 ? vec3(.1, .27, .58) : ak < .45 ? vec3(.68, .13, .11) : ak < .6 ? vec3(.14, .44, .25) : ak < .75 ? vec3(.86, .45, .1) : vec3(.68, .7, .72);
       float fb = floors - vFacade.y;
@@ -454,6 +467,7 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
         albedo = mix(vec3(.05, .08, .16), vec3(.55, .57, .6), g * clamp(1.0 - fwidth(p.x) * 3.0, 0.0, 1.0)); tzRough = .22;
       } else if (style < 21.5) { albedo = vec3(.8, .81, .8) * (.9 + .1 * tzNoise(p * 4.0)); tzRough = .4; }               // tank / HVAC
       else if (style < 22.5) { albedo = vec3(.2, .27, .3); tzRough = .12; }                                              // skylight glazing
+      else if (style > 23.5) { albedo = vec3(.85, .64, .26) * (.85 + .3 * max(0.0, vWNorm.y)); tzRough = .25; }          // gilded bronze alem
       else {                                                                                                            // brick chimney
         float course = floor(p.y / .075), j = fract(p.x / .22 + .5 * mod(course, 2.0));
         float mortar = max(step(.88, fract(p.y / .075)), step(.92, j)) * clamp(1.0 - fwidth(p.y) * 8.0, 0.0, 1.0);
@@ -462,8 +476,20 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
       }
     } else if (style > 16.5 && style < 17.5) { albedo = tint * .62 * (.9 + .1 * tzNoise(p * 2.0)); tzRough = .9; }          // eave soffit / fascia, in shade
     else if (style > 17.5 && style < 18.5) { albedo = mix(tint, vec3(.8, .79, .76), .6) * (.88 + .14 * tzNoise(p * 3.0 + id)); tzRough = .92; } // parapet coping
-    else if (style > 13.5 && style < 14.5) { albedo = tint * (.8 + .2 * vFacade.y / 6.0); tzRough = .45; }       // dome
-    else if (style > 14.5 && style < 15.5) { albedo = tint * (.9 + .1 * step(.5, fract(vFacade.y * 6.0))); tzRough = .7; } // minaret
+    else if (style > 13.5 && style < 14.5) {
+      // lead dome / külah: standing-seam ribs on every facet edge and a half-way seam, horizontal sheet laps, patina
+      float fu = fract(p.x * 2.0), fwr = fwidth(p.x) * 2.0, fade = clamp(1.0 - fwr * 3.0, 0.0, 1.0);
+      float rib = 1.0 - smoothstep(.0, .06 + fwr, min(fu, 1.0 - fu));
+      float lap = 1.0 - smoothstep(.0, .04 + fwidth(p.y * 3.0), abs(fract(p.y * 3.0) - .5) - .44);
+      albedo = tint * (.84 + .1 * tzNoise(p * vec2(3.0, 5.0) + id)) * (1.0 + (.3 * rib - .08 * (1.0 - lap)) * fade);
+      tzRel = .5 + .35 * rib * fade; tzRough = .4;
+    } else if (style > 14.5 && style < 15.5) {
+      // minaret ashlar: courses every 0.4 m with staggered joints, a little weathering
+      float course = floor(p.y * 6.0), fj = fract(p.x * 2.0 + .5 * mod(course, 2.0)), fwc = fwidth(p.y * 6.0);
+      float joint = max(1.0 - smoothstep(.0, .05 + fwc, fract(p.y * 6.0)), 1.0 - smoothstep(.0, .04 + fwidth(p.x * 2.0), min(fj, 1.0 - fj)));
+      albedo = tint * (.92 + .1 * tzHash(vec2(floor(p.x * 2.0 + .5 * mod(course, 2.0)), course) + id)) * (1.0 - .18 * joint * clamp(1.0 - fwc * 3.0, 0.0, 1.0));
+      tzRel = .5 - .2 * joint; tzRough = .8;
+    }
     else if ((style > 10.5 && style < 12.5) || (style > 15.5 && style < 16.5)) {
       // clay tiles: rows along the slope with staggered joints
       float rowi = floor(p.y / .34);

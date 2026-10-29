@@ -51,8 +51,8 @@
 ## Phase 5: Religious Architecture Overhaul (All 59 Named Mosques)
 *Playbook: [tickets/PHASE5_PLAYBOOK.md](./tickets/PHASE5_PLAYBOOK.md)*
 
-- [ ] **Ticket 5.1** — Mosque Classifier & Multi-Dome Ottoman Superstructure (Central lead dome on octagonal drum with clerestory windows, corner half-domes, and *Son Cemaat Yeri* entrance portico domes) in `src/engine/geometry.worker.js` & `src/engine/materials.js` *(GitHub Issue #15)*
-- [ ] **Ticket 5.2** — High-Detail Turkish Minaret Generator (Square stone base *kaide*, chamfered transition *küp*, 12-sided fluted shaft, *şerefe* balcony with carved parapet, conical lead *külah* spire, and gilded *alem* finial) in `src/engine/geometry.worker.js` *(GitHub Issue #16)*
+- [x] **Ticket 5.1** — Mosque Classifier & Multi-Dome Ottoman Superstructure (Central lead dome on octagonal drum with clerestory windows, corner half-domes, and *Son Cemaat Yeri* entrance portico domes) in `src/engine/geometry.worker.js` & `src/engine/materials.js` *(GitHub Issue #15)*
+- [x] **Ticket 5.2** — High-Detail Turkish Minaret Generator (Square stone base *kaide*, chamfered transition *küp*, 12-sided fluted shaft, *şerefe* balcony with carved parapet, conical lead *külah* spire, and gilded *alem* finial) in `src/engine/geometry.worker.js` *(GitHub Issue #16)*
 
 ---
 

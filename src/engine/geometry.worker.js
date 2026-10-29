@@ -140,6 +140,8 @@ const COASTAL_WALLS = ['#efe2c4', '#e8cf9e', '#f3ece0', '#e2b98f', '#ead9bd', '#
 const VILLA_MAH = new Set(['Tepeören', 'Akfırat', 'Orhanlı', 'Fatih', 'Anadolu', 'Mescit']);
 const VILLA_WALLS = ['#f3efe6', '#efe6d2', '#e9dcc3', '#f6f3ec', '#e4d3b8', '#ead8bd'].map(hex);
 const VILLA_TILES = ['#9c4e38', '#844232', '#5a5652'].map(hex);
+// mosques: cut limestone (küfeki)
+const KUFEKI = ['#e6dfd1', '#ded5c3', '#d6cbb8'].map(hex);
 const DENSE_MAH = new Set(['Aydıntepe', 'İçmeler', 'Yayla', 'Şifa', 'Mimar Sinan', 'Orta', 'Aydınlı', 'Evliya Çelebi']);
 // TOKİ / Kiptaş estates: warm sand and dual-tone beige plaster, one colour per estate
 const ESTATE_WALLS = ['#e8d5b0', '#e6c9a8', '#efe0c6', '#dcc0a0', '#e9dccb', '#e3cdb4'].map(hex);
@@ -220,7 +222,7 @@ function build({ osm, terrain, ground, options }) {
     return c.v++;
   }
   // info.w = floors + (archetype + seed) / 8: archetype 0 generic, 1 coastal/historic, 2 dense 1980s-90s,
-  // 3 TOKİ/Kiptaş estate, 4 yeni nesil site, 5 suburban villa, 6 OSB industrial
+  // 3 TOKİ/Kiptaş estate, 4 yeni nesil site, 5 suburban villa, 6 OSB industrial (style 5: mosque), 7 OSB with loading docks
   const packW = (floors, seed, arche = 0) => Math.floor(floors) + (arche + Math.min(.998, Math.max(.002, seed))) / 8;
 
   // mahalle of a point: the nearest suburb/town label
@@ -276,6 +278,18 @@ function build({ osm, terrain, ground, options }) {
   const { isNearRoad, rings, holesOf, partyWall, dup } = urbanTopology(osm.roads, osm.buildings, terrain.bounds);
   stats.topologyMs = Math.round(performance.now() - tTopo);
   const estateOf = estates(osm.buildings, rings, dup);
+  // mosques (Phase 5): religious polygons plus any building holding a cami / mescit name
+  const mosque = new Uint8Array(total);
+  for (let i = 0; i < total; i++) if (osm.buildings[i][3] === 5) mosque[i] = 1;
+  for (const p of named) {
+    if (!/cami|mescit/.test(p[0].toLocaleLowerCase('tr'))) continue;
+    for (let i = 0; i < total; i++) {
+      const r = rings[i]; if (dup[i] || r.length < 6) continue;
+      let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (let k = 0; k < r.length; k += 2) { if (r[k] < x0) x0 = r[k]; if (r[k] > x1) x1 = r[k]; if (r[k + 1] < z0) z0 = r[k + 1]; if (r[k + 1] > z1) z1 = r[k + 1]; }
+      if (p.wx >= x0 && p.wx <= x1 && p.wz >= z0 && p.wz <= z1 && pointInRing(p.wx, p.wz, r)) { mosque[i] = 1; break; }
+    }
+  }
   for (let bid = 0; bid < total; bid++) {
     if (bid % 2000 === 0) progress('buildings', bid / total);
     const b = osm.buildings[bid];
@@ -295,7 +309,7 @@ function build({ osm, terrain, ground, options }) {
     const eh = est >= 0 ? hash2(est * .731, est * .117 + 4.1) : 0;
 
     // heights in metres: OSM tags first, otherwise an estimate quantised to floors
-    let floorH = industrial ? 5 : 3.05, floors, heightM, known = 0;
+    let floorH = industrial ? 5 : mosque[bid] ? 4.5 : 3.05, floors, heightM, known = 0;
     if (b[1]) { heightM = b[1]; floors = Math.max(1, Math.round(heightM / floorH)); known = 1; }
     else if (b[2]) { floors = Math.max(1, Math.round(b[2])); heightM = floors * floorH + .6; known = 2; }
     else {
@@ -309,6 +323,7 @@ function build({ osm, terrain, ground, options }) {
       else floors = 4 + Math.round(r1 * 4);
       heightM = floors * floorH + (industrial ? 0 : .6);
       if (est >= 0) { floors = 5 + Math.floor(eh * 7) + (r1 > .8); heightM = floors * floorH + .6; }
+      if (mosque[bid] && !industrial) { floors = Math.max(1, Math.round(Math.min(13, 5.5 + Math.sqrt(area) * .22) / 4.5)); heightM = floors * 4.5 + .3; }
     }
     // wall topology: 0 street front, 1 side, 2 rear/courtyard, 3 blind party wall
     const positive = sa >= 0, roles = new Uint8Array(n);
@@ -347,6 +362,8 @@ function build({ osm, terrain, ground, options }) {
     else if (floors >= 9) style = 1;
     else if (floors <= 2 && area < 200 || kind === 3 && floors <= 3) style = 3;
     else style = (partyLen > perim * .18 && floors >= 3) || r2 < .18 ? 4 : 0;
+    const isMosque = mosque[bid] === 1 && !industrial;
+    if (isMosque) style = 5;
     // dense mahalles: estates and new residential towers are plastered apartment blocks, not curtain walls
     const villa = style === 3 && !industrial && (VILLA_MAH.has(mah) || cz < 1.8);
     const site = dense && est < 0 && (kind === 1 || kind === 0 && b[2]) && floors >= 5 && style !== 4 && (floors >= 9 || r3 > .62);
@@ -356,7 +373,8 @@ function build({ osm, terrain, ground, options }) {
     const convex = isConvex(ring), quad = n === 4 && convex, pitchable = !holes && !industrial && convex;
     const rs = b[6] || 0;
     let roofType = 0;
-    if (rs === 2) roofType = !pitchable ? 0 : quad ? 1 : n <= 10 ? 2 : 0;
+    if (isMosque) { /* flat roof: the dome superstructure is added after the building pass */ }
+    else if (rs === 2) roofType = !pitchable ? 0 : quad ? 1 : n <= 10 ? 2 : 0;
     else if (rs === 3) roofType = !pitchable ? 0 : quad ? 3 : n <= 10 ? 2 : 0;
     else if (rs === 4) roofType = pitchable && n <= 12 ? 2 : 0;
     else if (rs === 0 && est >= 0) roofType = pitchable && n <= 10 && eh < .55 ? (quad ? 1 : 2) : 0;
@@ -365,15 +383,16 @@ function build({ osm, terrain, ground, options }) {
     else if (rs === 0 && pitchable && style !== 1 && style !== 6 && n <= 10 && area < 1300 && r3 < (style === 3 ? .92 : .78)) roofType = quad ? (style === 3 && r3 < .35 ? 3 : 1) : 2;
     // L-shaped plans (6 orthogonal corners): two overlapping hipped wings (roofType 4 while building, reported as hipped)
     let lWings = null;
-    if (roofType === 0 && n === 6 && !convex && !holes && !industrial && area < 900 && (rs === 0 || rs === 2) && style !== 1 && style !== 6 && r3 < .85) {
+    if (roofType === 0 && !isMosque && n === 6 && !convex && !holes && !industrial && area < 900 && (rs === 0 || rs === 2) && style !== 1 && style !== 6 && r3 < .85) {
       lWings = lShapeWings(ring);
       if (lWings) roofType = 4;
     }
-    const PARAPET = .00055, parapet = roofType === 0 && !industrial && !holes && area >= 55 && style !== 2 && style !== 7;
+    const PARAPET = .00055, parapet = roofType === 0 && !isMosque && !industrial && !holes && area >= 55 && style !== 2 && style !== 7;
 
     // mahalle archetypes (Phase 4)
     let arche = 0, palette = STYLE_WALLS[style], pr = r2;
-    if (COASTAL_MAH.has(mah) && cz > 5.8 && (style === 0 || style === 3 || style === 4 || style === 6)) { arche = 1; palette = COASTAL_WALLS; }
+    if (isMosque) { palette = KUFEKI; arche = 6; } // style 5 + arche 6: the shader draws arched mosque windows
+    else if (COASTAL_MAH.has(mah) && cz > 5.8 && (style === 0 || style === 3 || style === 4 || style === 6)) { arche = 1; palette = COASTAL_WALLS; }
     else if (est >= 0) { arche = 3; palette = ESTATE_WALLS; pr = eh; }
     else if (site) { arche = 4; palette = SITE_WALLS; }
     else if (dense && style === 4) arche = 2;
@@ -672,44 +691,97 @@ function build({ osm, terrain, ground, options }) {
       for (const id of list) if (meta[id * 12 + 2] > 0 && pointInRing(p.wx, p.wz, rings[id])) { names[id] = p[0]; stats.named++; break search; }
     }
   }
-  // mosques: a lead dome and a minaret, the most recognisable silhouette of an İstanbul street
-  const LEAD = [.56, .6, .63], STONE = [.92, .9, .85];
-  for (const id in names) {
-    if (!names[id].toLocaleLowerCase('tr').includes('cami')) continue;
-    const m = id * 12, cx = meta[m], cz = meta[m + 1], area = meta[m + 5], top = meta[m + 11], hKm = meta[m + 2] / 1000, ring = rings[id];
-    const c = getChunk(cx, cz), bid = +id;
+  /**
+   * Surface of revolution around (ox, oz) from a bottom-to-top profile of [r, y, v?, nr?, ny?] points, one facet per side.
+   * `smooth` interpolates normals around the axis (domes); otherwise facets are flat, or concave-fluted by `flute` radians.
+   * uv: u counts facets (so integer u marks facet edges), v defaults to height in 2.4 m units.
+   */
+  function lathe(c, ox, oz, prof, sides, colr, bid, code, g0, iw, smooth = false, flute = 0) {
+    for (let k = 0; k + 1 < prof.length; k++) {
+      const [r0, y0, v0 = (y0 - g0) * 1000 / 2.4, n0r, n0y] = prof[k], [r1, y1, v1 = (y1 - g0) * 1000 / 2.4, n1r, n1y] = prof[k + 1];
+      if (r0 <= 0 && r1 <= 0) continue;
+      const dr = r0 - r1, dy = y1 - y0, nl = Math.hypot(dy, dr) || 1, sny = dr / nl, snh = dy / nl;
+      const fl = flute && r0 === r1 && dy > .003 ? flute : 0;
+      for (let s2 = 0; s2 < sides; s2++) {
+        const t0 = s2 / sides * Math.PI * 2, t1 = (s2 + 1) / sides * Math.PI * 2, tc = (t0 + t1) / 2;
+        const ids = [[t0, r0, y0, v0, n0r, n0y, s2, tc - fl], [t1, r0, y0, v0, n0r, n0y, s2 + 1, tc + fl], [t1, r1, y1, v1, n1r, n1y, s2 + 1, tc + fl], [t0, r1, y1, v1, n1r, n1y, s2, tc - fl]].map(([t, r, y, v, nr, ny, u, tn]) => {
+          const ta = smooth ? t : tn, hr = nr ?? snh, vy = ny ?? sny;
+          return vert(c, ox + Math.cos(t) * r, y, oz + Math.sin(t) * r, Math.cos(ta) * hr, vy, Math.sin(ta) * hr, u, v, colr, bid, code, y - g0, iw);
+        });
+        // winding from the non-degenerate triangle against the expected outward normal
+        const P = q => [ox + Math.cos(q[0]) * q[1], q[2], oz + Math.sin(q[0]) * q[1]];
+        const A0 = P([t0, r0, y0]), A1 = P([t1, r0, y0]), B1 = P([t1, r1, y1]), B0 = P([t0, r1, y1]);
+        const f = r0 >= r1 ? faceNormal(...A0, ...A1, ...B1) : faceNormal(...A0, ...B1, ...B0);
+        if (f[0] * Math.cos(tc) * snh + f[1] * sny + f[2] * Math.sin(tc) * snh >= 0) c.idx.push3(ids[0], ids[1], ids[2]), c.idx.push3(ids[0], ids[2], ids[3]);
+        else c.idx.push3(ids[0], ids[2], ids[1]), c.idx.push3(ids[0], ids[3], ids[2]);
+      }
+    }
+  }
+  // mosques (Phase 5): cut-stone prayer hall with an octagonal kasnak, ribbed lead dome and gilded alem, corner
+  // cupolas on larger halls, and Turkish minarets on the entrance (son cemaat) corners opposite the qibla
+  // info.y roof codes: 114 lead, 115 minaret stone, 118 cornice, 124 gilded bronze
+  const LEAD = [.5, .54, .57], STONE = hex('#e2dacb'), BRONZE = [.8, .62, .28];
+  const QX = Math.sin(151 * Math.PI / 180), QZ = -Math.cos(151 * Math.PI / 180); // qibla bearing from Tuzla (x east, z south)
+  const alem = (c, x, y, z, sc, bid, iwM) => lathe(c, x, z, [[.00007 * sc, y], [.00007 * sc, y + .0009 * sc], [.00028 * sc, y + .0012 * sc], [.00028 * sc, y + .0015 * sc], [.00005 * sc, y + .0019 * sc], [0, y + .0026 * sc]], 6, BRONZE, bid, 124, y, iwM);
+  const domeOn = (c, x, z, rd, y0, bid, iwM, big) => {
+    const R = rd / Math.cos(Math.PI / 8), hd = .28 * rd, yd = y0 + hd;
+    lathe(c, x, z, [[R, y0 - .0002, 1.05], [R, yd, 1.95]], 8, STONE, bid, 5, y0, packW(2, .5));                 // kasnak with arched windows
+    lathe(c, x, z, [[R, yd], [R * 1.05, yd], [R * 1.05, yd + .00025], [rd * .98, yd + .00025]], 8, STONE, bid, 118, y0, iwM); // cornice
+    const RINGS = big ? 8 : 5, prof = [];
+    for (let i = 0; i <= RINGS; i++) { const ph = i / RINGS * Math.PI / 2; prof.push([rd * Math.cos(ph), yd + .00025 + rd * Math.sin(ph) * .96, i, Math.cos(ph), Math.sin(ph)]); }
+    lathe(c, x, z, prof, big ? 24 : 12, LEAD, bid, 114, y0, iwM, true);
+    return yd + .00025 + rd * .96;
+  };
+  for (let bid = 0; bid < total; bid++) {
+    const m = bid * 12;
+    if (!mosque[bid] || !(meta[m + 2] > 0) || meta[m + 10]) continue;
+    const cx = meta[m], cz = meta[m + 1], area = meta[m + 5], top = meta[m + 11], ring = rings[bid], n = ring.length / 2;
+    const c = getChunk(cx, cz), iwM = packW(1, .5), side = Math.sqrt(area) / 1000;
     const rd = Math.min(14, Math.max(3.5, Math.sqrt(area) * .3)) / 1000;
-    const SEG = 14, RINGS = 6;
-    const base = c.v;
-    for (let r = 0; r <= RINGS; r++) {
-      const ph = r / RINGS * Math.PI / 2, y = Math.sin(ph), rr = Math.cos(ph);
-      for (let s = 0; s <= SEG; s++) {
-        const th = s / SEG * Math.PI * 2, nx = Math.cos(th) * rr, nz = Math.sin(th) * rr;
-        vert(c, cx + nx * rd, top + y * rd, cz + nz * rd, nx, y, nz, s, r, LEAD, bid, 114, hKm + y * rd, .5);
+    const apex = domeOn(c, cx, cz, rd, top, bid, iwM, true);
+    alem(c, cx, apex, cz, 1.3, bid, iwM);
+    // corner cupolas between the main dome and the hall corners
+    let ax = 1, az = 0, best = 0;
+    for (let i = 0; i < n; i++) { const j = (i + 1) % n, ex = ring[j * 2] - ring[i * 2], ez = ring[j * 2 + 1] - ring[i * 2 + 1], l = Math.hypot(ex, ez); if (l > best) { best = l; ax = ex / l; az = ez / l; } }
+    if (area >= 220) {
+      let t0 = Infinity, t1 = -Infinity, s0 = Infinity, s1 = -Infinity;
+      for (let i = 0; i < n; i++) { const dx = ring[i * 2] - cx, dz = ring[i * 2 + 1] - cz, t = dx * ax + dz * az, sv = -dx * az + dz * ax; t0 = Math.min(t0, t); t1 = Math.max(t1, t); s0 = Math.min(s0, sv); s1 = Math.max(s1, sv); }
+      const rc = .38 * rd, mg = rc * 1.35;
+      for (const [t, sv] of [[t0 + mg, s0 + mg], [t1 - mg, s0 + mg], [t1 - mg, s1 - mg], [t0 + mg, s1 - mg]]) {
+        const px = cx + ax * t - az * sv, pz = cz + az * t + ax * sv;
+        if (Math.hypot(t, sv) < rd * 1.08 / Math.cos(Math.PI / 8) + rc * 1.1 || !pointInRing(px, pz, ring)) continue;
+        const ya = domeOn(c, px, pz, rc, top, bid, iwM, false);
+        alem(c, px, ya, pz, .6, bid, iwM);
+        stats.cupolas = (stats.cupolas || 0) + 1;
       }
     }
-    for (let r = 0; r < RINGS; r++) for (let s = 0; s < SEG; s++) {
-      const a = base + r * (SEG + 1) + s, b = a + SEG + 1;
-      c.idx.push3(a, b, a + 1); c.idx.push3(a + 1, b, b + 1);
+    // minarets on the front corners: the vertex furthest from the qibla, and for grand mosques the other front corner
+    const fd = i => -(ring[i * 2] - cx) * QX - (ring[i * 2 + 1] - cz) * QZ;
+    let ca = 0; for (let i = 1; i < n; i++) if (fd(i) > fd(ca)) ca = i;
+    const corners = [ca];
+    if (area > 550) {
+      let cb = -1;
+      for (let i = 0; i < n; i++) if (Math.hypot(ring[i * 2] - ring[ca * 2], ring[i * 2 + 1] - ring[ca * 2 + 1]) > side * .45 && (cb < 0 || fd(i) > fd(cb))) cb = i;
+      if (cb >= 0) corners.push(cb);
     }
-    // minaret at the first corner
-    const mx = ring[0] + (cx - ring[0]) * .08, mz = ring[1] + (cz - ring[1]) * .08, g = elev(mx, mz) - .001;
-    const mh = Math.max(hKm + .02, .026), mr = .0014, SIDES = 8;
-    const cyl = (r0, r1, y0, y1, rel0, rel1) => {
-      const b0 = c.v;
-      for (let s = 0; s <= SIDES; s++) {
-        const th = s / SIDES * Math.PI * 2, nx = Math.cos(th), nz = Math.sin(th), slope = (r0 - r1) / (y1 - y0 || 1) * .001;
-        const nl = Math.hypot(1, slope);
-        vert(c, mx + nx * r0, y0, mz + nz * r0, nx / nl, slope / nl, nz / nl, s, 0, STONE, bid, 115, rel0, .5);
-        vert(c, mx + nx * r1, y1, mz + nz * r1, nx / nl, slope / nl, nz / nl, s, 1, STONE, bid, 115, rel1, .5);
-      }
-      for (let s = 0; s < SIDES; s++) { const a = b0 + s * 2; c.idx.push3(a, a + 2, a + 1); c.idx.push3(a + 1, a + 2, a + 3); }
-    };
-    const baseRel = 0;
-    cyl(mr, mr, g, g + mh * .78, 0, mh * .78 + baseRel);
-    cyl(mr * 1.7, mr * 1.7, g + mh * .78, g + mh * .8, mh * .78 + baseRel, mh * .8 + baseRel);
-    cyl(mr * .9, mr * .9, g + mh * .8, g + mh, mh * .8 + baseRel, mh + baseRel);
-    cyl(mr * .95, 0.00005, g + mh, g + mh + .006, mh + baseRel, mh + .006 + baseRel);
+    const mr = Math.min(.0017, .0011 + Math.sqrt(area) * .00001), mh = Math.min(.052, Math.max(.026, .022 + Math.sqrt(area) * .0004));
+    for (const k of corners) {
+      const kx = ring[k * 2], kz = ring[k * 2 + 1], dl = Math.hypot(cx - kx, cz - kz) || 1;
+      const mx = kx + (cx - kx) / dl * mr * 1.6, mz = kz + (cz - kz) / dl * mr * 1.6, g = elev(mx, mz);
+      const yK = g + Math.max(.004, (top - g) * .85), yS1 = g + mh * .74, yS2 = g + mh * .87, yT = g + mh;
+      // kaide: square stone base, buried 1.2 m into the slope
+      box(c, mx, mz, ax, az, mr * 1.25, mr * 1.25, g - .0012, yK, STONE, bid, 115, g, iwM);
+      const prof = [[mr * 1.2, yK], [mr, yK + .0018], [mr, yS1 - .0013], [mr * 1.65, yS1], [mr * 1.65, yS1 + .001], [mr * 1.55, yS1 + .001], [mr * 1.55, yS1], [mr * .9, yS1]];
+      if (area > 550) prof.push([mr * .9, yS2 - .0011], [mr * 1.5, yS2], [mr * 1.5, yS2 + .0009], [mr * 1.42, yS2 + .0009], [mr * 1.42, yS2], [mr * .8, yS2]);
+      const rT = area > 550 ? mr * .8 : mr * .9;
+      prof.push([rT, yT], [rT * 1.18, yT], [rT * 1.18, yT + .0003]);
+      lathe(c, mx, mz, prof, 12, STONE, bid, 115, g, iwM, false, .3);
+      // külah: tall lead cone, then the alem
+      const yC = yT + .0003, hC = .006 + mh * .09;
+      lathe(c, mx, mz, [[rT * 1.12, yC], [rT * .55, yC + hC * .55], [0, yC + hC]], 12, LEAD, bid, 114, g, iwM, true);
+      alem(c, mx, yC + hC - .0002, mz, .9, bid, iwM);
+      stats.minarets = (stats.minarets || 0) + 1;
+    }
     stats.mosques = (stats.mosques || 0) + 1;
   }
   // hero landmarks share the chunk buffers; info encoders must match vert() above
