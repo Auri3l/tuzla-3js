@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0d2834">
+  <meta name="description" content="Tuzla, İstanbul'u OpenStreetMap verisiyle oluşturulmuş canlı bir 3B modelde keşfedin.">
+  <title>Tuzla, İstanbul — 3B ilçe modeli</title>
+</head>
+<body>
+  <main class="app">
+    <div id="map-shell" class="map-shell">
+      <canvas id="map-canvas" tabindex="0" aria-label="Tuzla, İstanbul'un üç boyutlu haritası. Döndürmek için sürükleyin, yakınlaşmak için kaydırın."></canvas>
+      <div id="labels" class="labels" aria-label="Harita etiketleri"></div>
+      <div class="loading" id="loading">
+        <div class="loading-ring"></div>
+        <div><strong data-i18n="loading">TUZLA İNŞA EDİLİYOR</strong><span id="loading-text">Harita, arazi ve uydu görüntüsü yükleniyor…</span><div class="loading-bar"><i id="loading-bar"></i></div></div>
+      </div>
+    </div>
+    <div class="vignette" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <button class="brand" id="home-button" aria-label="Tuzla sahil görünümüne dön">
+        <span class="brand-icon"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M4 22.5 12.5 7l5.2 9.1L21 11l7 11.5H4Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M7 25.5h18" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+        <span><strong>TUZLA <small>3D</small></strong><em data-i18n="brandSub">İSTANBUL / TÜRKİYE</em></span>
+      </button>
+      <div class="search" role="search">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="6.5" stroke="currentColor" stroke-width="1.5"/><path d="m16 16 4.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <input id="search-input" type="search" autocomplete="off" spellcheck="false" data-i18n-ph="searchPh" placeholder="Mahalle, cami, okul, park ara…" aria-label="Ara" aria-controls="search-results" aria-expanded="false">
+        <kbd>/</kbd>
+        <ul id="search-results" class="search-results" role="listbox" hidden></ul>
+      </div>
+      <div class="top-actions">
+        <div class="lang-toggle" role="group" aria-label="Dil / Language"><button data-lang="tr" class="active">TR</button><button data-lang="en">EN</button></div>
+        <span class="top-divider"></span>
+        <button id="about-button" class="text-button"><span class="info-icon">i</span><span data-i18n="about">VERİ HAKKINDA</span></button>
+      </div>
+    </header>
+
+    <section class="hero" aria-live="polite">
+      <div class="hero-kicker"><span class="small-line"></span><span data-i18n="kicker">YAKINDAN BAKIN</span></div>
+      <h1 id="hero-title">Tuzla<span>.</span></h1>
+      <p id="hero-description">Marmara kıyısından iç kesimdeki tepelere, İstanbul'un gerçek bir köşesi.</p>
+      <div class="hero-rule"></div>
+      <div class="view-meta"><div><span data-i18n="viewing">ŞU AN</span><strong id="view-name">Tuzla Sahil</strong></div><div class="view-meta-right"><span data-i18n="coords">KOORDİNAT</span><strong id="view-coords">40.816° N &nbsp; 29.300° E</strong></div></div>
+      <div class="hero-buttons">
+        <button class="overview-button" id="district-button"><span data-i18n="district">İLÇEYİ GÖR</span><span class="arrow">↗</span></button>
+        <button class="tour-button" id="tour-button" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M8 5.5v13l10-6.5-10-6.5Z" fill="currentColor"/></svg><span data-i18n="tour">OTOMATİK TUR</span></button>
+      </div>
+      <div class="hint"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3v18M3 12h18M12 3 9.5 5.5M12 3l2.5 2.5M3 12l2.5-2.5M3 12l2.5 2.5m15-2.5-2.5-2.5M21 12l-2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="hint">SÜRÜKLE: DÖNDÜR · TEKERLEK: YAKINLAŞ</span></div>
+      <div class="stats" id="stats"></div>
+    </section>
+
+    <div class="map-tools">
+      <div class="view-toggle" aria-label="Görünüm"><button id="three-d-button" class="active" aria-pressed="true">3D</button><button id="top-button" aria-pressed="false">2D</button></div>
+      <div class="tool-stack">
+        <button class="tool" id="layers-button" aria-expanded="false" aria-controls="layers-panel" data-i18n-title="layers" title="Harita katmanları"><svg viewBox="0 0 24 24" fill="none"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
+        <button class="tool" id="settings-button" aria-expanded="false" aria-controls="settings-panel" data-i18n-title="settings" title="Görünüm ayarları"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.4"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+        <button class="tool" id="walk-button" data-i18n-title="walk" title="Sokak seviyesi"><svg viewBox="0 0 24 24" fill="none"><circle cx="12.5" cy="4.5" r="1.8" stroke="currentColor" stroke-width="1.4"/><path d="m9 21 2.2-6.5L9.5 12l1.5-4.5 3.5 2 2.5 2.5M11 7.5 7.5 10l-.5 3.5M13.5 14.5 15 21" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+      <div class="layers-panel panel" id="layers-panel" hidden>
+        <div class="layer-heading"><span data-i18n="layers">HARİTA KATMANLARI</span> <span data-i18n="layersSub">GÖSTER / GİZLE</span></div>
+        <label><input type="checkbox" data-layer="buildings" checked><span data-i18n="lBuildings">3B binalar</span></label>
+        <label><input type="checkbox" data-layer="streets" checked><span data-i18n="lStreets">Yollar ve raylar</span></label>
+        <label><input type="checkbox" data-layer="trees" checked><span data-i18n="lTrees">Ağaçlar</span></label>
+        <label><input type="checkbox" data-layer="traffic" checked><span data-i18n="lTraffic">Trafik ve trenler</span></label>
+        <label><input type="checkbox" data-layer="ships" checked><span data-i18n="lShips">Gemiler ve yatlar</span></label>
+        <label><input type="checkbox" data-layer="boundary" checked><span data-i18n="lBoundary">İlçe sınırı</span></label>
+        <label><input type="checkbox" data-layer="labels" checked><span data-i18n="lLabels">Etiketler</span></label>
+      </div>
+      <div class="settings-panel panel" id="settings-panel" hidden>
+        <div class="layer-heading"><span data-i18n="settings">GÖRÜNÜM AYARLARI</span></div>
+        <div class="setting">
+          <div class="setting-row"><span data-i18n="time">Günün saati</span><output id="time-value">15:30</output></div>
+          <input type="range" id="time-range" min="0" max="24" step="0.0833" value="15.5" aria-label="Günün saati">
+          <div class="setting-row small"><button class="chip" id="time-now" data-i18n="now">ŞİMDİ</button><label class="inline"><input type="checkbox" id="timelapse"><span data-i18n="timelapse">Zaman akışı</span></label></div>
+          <div class="time-presets"><button class="chip" data-time="7">07:00</button><button class="chip" data-time="12.5">12:30</button><button class="chip" data-time="18.6">18:36</button><button class="chip" data-time="21.5">21:30</button></div>
+        </div>
+        <div class="setting">
+          <div class="setting-row"><span data-i18n="heights">Bina yüksekliği</span><output id="height-value">1.25×</output></div>
+          <input type="range" id="height-range" min="1" max="2.5" step="0.05" value="1.25" aria-label="Bina yüksekliği">
+        </div>
+        <div class="setting">
+          <div class="setting-row"><span data-i18n="quality">Grafik kalitesi</span></div>
+          <div class="segmented" id="quality-group"><button data-quality="low" data-i18n="qLow">Düşük</button><button data-quality="medium" data-i18n="qMedium">Orta</button><button data-quality="high" data-i18n="qHigh">Yüksek</button></div>
+        </div>
+        <label class="inline"><input type="checkbox" id="animate-toggle" checked><span data-i18n="animation">Animasyonlar</span></label>
+      </div>
+      <div class="zoom-stack">
+        <button id="zoom-in" aria-label="Yakınlaş">+</button><button id="zoom-out" aria-label="Uzaklaş">−</button>
+        <button id="reset-view" aria-label="Kamerayı sıfırla" title="Kamerayı sıfırla"><svg viewBox="0 0 24 24" fill="none"><path d="M19 8a7.5 7.5 0 1 0 .1 7.7M19 8V3.8M19 8h-4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+      <div class="tool-stack">
+        <button class="tool" id="share-button" data-i18n-title="share" title="Bu görünümün linkini kopyala"><svg viewBox="0 0 24 24" fill="none"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
+        <button class="tool" id="shot-button" data-i18n-title="shot" title="Ekran görüntüsü"><svg viewBox="0 0 24 24" fill="none"><path d="M4 8.5h3l1.5-2.5h7L17 8.5h3V19H4V8.5Z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="12" cy="13.5" r="3.2" stroke="currentColor" stroke-width="1.4"/></svg></button>
+        <button class="tool" id="full-button" data-i18n-title="full" title="Tam ekran"><svg viewBox="0 0 24 24" fill="none"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+      <button class="compass" id="compass" data-i18n-title="north" title="Kuzeyi yukarı al"><span>N</span><svg viewBox="0 0 20 20" fill="none"><path d="M10 2 14 16l-4-3-4 3 4-14Z" fill="currentColor"/></svg></button>
+    </div>
+
+    <aside class="info-card" id="info-card" hidden aria-live="polite">
+      <button class="modal-close" id="info-close" aria-label="Kapat">×</button>
+      <div class="modal-kicker" id="info-kicker">BİNA</div>
+      <h3 id="info-name">İsimsiz bina</h3>
+      <dl id="info-list"></dl>
+      <button class="chip strong" id="info-focus" data-i18n="bFocus">YAKINLAŞ</button>
+    </aside>
+
+    <div class="walk-hud" id="walk-hud" hidden>
+      <span data-i18n="walkHint">SÜRÜKLE: BAK · W A S D: YÜRÜ</span>
+      <div class="walk-pad"><button id="walk-fwd" aria-label="İleri">▲</button><button id="walk-back" aria-label="Geri">▼</button></div>
+      <button class="chip strong" id="walk-exit" data-i18n="walkExit">ÇIK</button>
+    </div>
+
+    <section class="explore" aria-label="Tuzla'daki yerleri keşfedin">
+      <div class="explore-heading"><span><span class="heading-cross">✳</span> <span data-i18n="explore">TUZLA'YI KEŞFET</span></span><span class="explore-sub" data-i18n="exploreSub">GİTMEK İÇİN BİR YER SEÇİN</span></div>
+      <div class="place-list" id="place-list"></div>
+    </section>
+    <div class="attribution"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap contributors</a><span>·</span><a href="https://s2maps.eu/" target="_blank" rel="noopener noreferrer">Sentinel-2 cloudless 2017 by EOX</a><span>·</span><span>Terrain: Mapzen / Tilezen</span></div>
+    <div class="model-note" data-i18n="modelNote">OSM TABANLARI · TAHMİNİ YÜKSEKLİKLER · SİMÜLE TRAFİK</div>
+    <div class="toast" id="toast" role="status" hidden></div>
+
+    <div class="modal-backdrop" id="about-modal" hidden>
+      <section class="about-modal" role="dialog" aria-modal="true" aria-labelledby="about-title">
+        <button class="modal-close" id="close-about" aria-label="Kapat">×</button>
+        <div class="modal-kicker" data-i18n="modalKicker">MODEL HAKKINDA</div><h2 id="about-title" data-i18n-html="modalTitle">Gerçek yerler.<br><em>Yaklaşık 3B.</em></h2>
+        <p data-i18n="modalBody"></p>
+        <div class="source-list"><div><span data-i18n="mData">HARİTA VERİSİ</span><strong>OpenStreetMap contributors · 29 Oct 2026</strong></div><div><span data-i18n="mSat">UYDU</span><strong>Sentinel-2 cloudless 2017 · EOX / Copernicus</strong></div><div><span data-i18n="mElev">YÜKSEKLİK</span><strong>Mapzen / Tilezen · AWS Open Data</strong></div></div>
+        <p class="modal-small" data-i18n="modalSmall"></p><p class="modal-small source-detail">Terrain tiles by Tilezen/Mapzen via AWS Open Data. Europe terrain uses Copernicus data and information funded by the EU (EU-DEM); global SRTM and GMTED2010 data courtesy of the U.S. Geological Survey.</p><p class="modal-small source-detail">Street references: <a href="https://commons.wikimedia.org/wiki/File:EROL_AKBULUT_TUZLA_SAH%C4%B0L_-_panoramio.jpg" target="_blank" rel="noopener noreferrer">Tuzla Sahil, Erol Akbulut (2005)</a> and <a href="https://commons.wikimedia.org/wiki/File:Tuzla_Evleri_-_panoramio.jpg" target="_blank" rel="noopener noreferrer">Tuzla Evleri, Necdet Tunçer (2012)</a>.</p>
+        <button class="modal-done" id="done-about"><span data-i18n="mDone">TAMAM</span> <span>↗</span></button>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

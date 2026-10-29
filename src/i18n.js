@@ -1,0 +1,86 @@
+// Interface strings (Turkish first, English second) and the curated places.
+export const PLACES = {
+  sahil: { lat: 40.8159513, lon: 29.3000716, dist: 1.25, az: 185, tilt: 60 },
+  marina: { lat: 40.8162, lon: 29.3162, dist: 1.15, az: 205, tilt: 56 },
+  shipyards: { lat: 40.8365, lon: 29.2905, dist: 2.6, az: 230, tilt: 56 },
+  icmeler: { lat: 40.8457, lon: 29.3001, dist: 1.05, az: 160, tilt: 55 },
+  park: { lat: 40.858352, lon: 29.317542, dist: .95, az: 200, tilt: 52 },
+  osb: { lat: 40.8835, lon: 29.392, dist: 2.4, az: 195, tilt: 55 },
+  sabanci: { lat: 40.8913, lon: 29.3784, dist: 1.5, az: 190, tilt: 55 },
+  track: { lat: 40.952753, lon: 29.405613, dist: 2.7, az: 200, tilt: 54 }
+};
+
+export const STRINGS = {
+  tr: {
+    htmlTitle: 'Tuzla, İstanbul — 3B ilçe modeli',
+    brandSub: 'İSTANBUL / TÜRKİYE', topMiddle: 'AÇIK VERİYLE CANLI İLÇE MODELİ', about: 'VERİ HAKKINDA',
+    searchPh: 'Mahalle, cami, okul, park ara…', searchNone: 'Sonuç bulunamadı',
+    kicker: 'YAKINDAN BAKIN', heroDesc: 'Marmara kıyısından iç kesimdeki tepelere, İstanbul\'un gerçek bir köşesi: binalar, sokaklar, tersaneler ve denizi ile.',
+    viewing: 'ŞU AN', coords: 'KOORDİNAT', district: 'İLÇEYİ GÖR', hint: 'SÜRÜKLE: DÖNDÜR · TEKERLEK: YAKINLAŞ · ÇİFT TIK: BİNAYA GİT',
+    explore: 'TUZLA\'YI KEŞFET', exploreSub: 'GİTMEK İÇİN BİR YER SEÇİN', tour: 'OTOMATİK TUR', tourStop: 'TURU DURDUR',
+    layers: 'HARİTA KATMANLARI', layersSub: 'GÖSTER / GİZLE', lBuildings: '3B binalar', lStreets: 'Yollar ve raylar', lTrees: 'Ağaçlar', lBoundary: 'İlçe sınırı', lTraffic: 'Trafik ve trenler', lShips: 'Gemiler ve yatlar', lLabels: 'Etiketler',
+    settings: 'GÖRÜNÜM AYARLARI', time: 'Günün saati', now: 'ŞİMDİ', timelapse: 'Zaman akışı', heights: 'Bina yüksekliği', quality: 'Grafik kalitesi', qLow: 'Düşük', qMedium: 'Orta', qHigh: 'Yüksek', animation: 'Animasyonlar',
+    walk: 'Sokak seviyesi', walkHint: 'SÜRÜKLE: BAK · W A S D / OKLAR: YÜRÜ · SHIFT: KOŞ · ESC: ÇIK', walkExit: 'ÇIK', shot: 'Ekran görüntüsü', share: 'Bu görünümün linkini kopyala', full: 'Tam ekran', north: 'Kuzeyi yukarı al',
+    copied: 'Link panoya kopyalandı', saved: 'Ekran görüntüsü kaydedildi',
+    loading: 'TUZLA İNŞA EDİLİYOR', lLoad: 'Harita, arazi ve uydu görüntüsü yükleniyor…', lGeometry: 'Geometri hazırlanıyor…', lBuildings: 'Binalar yükseliyor', lRoads: 'Yollar ve sokak lambaları çiziliyor', lTreesP: 'Ağaçlar dikiliyor', lScene: 'Sahne kuruluyor…',
+    fail: '3B görünüm başlatılamadı. Lütfen WebGL destekleyen güncel bir tarayıcı kullanın.',
+    bTitle: 'BİNA', bUnnamed: 'İsimsiz bina', bFloors: 'Kat', bHeight: 'Yükseklik', bArea: 'Taban alanı', bGround: 'Zemin kotu', bRoof: 'Çatı', bSource: 'Kaynak',
+    bKnownH: 'OSM yükseklik etiketi', bKnownL: 'OSM kat etiketi', bEstimated: 'Tahmini (alan ve kullanıma göre)', bFocus: 'YAKINLAŞ',
+    roofFlat: 'Düz', roofHip: 'Kırma (kiremit)', roofPyr: 'Piramit (kiremit)',
+    styles: ['Konut', 'Ofis / ticari', 'Sanayi / depo', 'Müstakil ev'],
+    stats: (s) => `${s.buildings.toLocaleString('tr')} bina · ${s.trees.toLocaleString('tr')} ağaç · ${s.mosques} cami · ${s.ships} gemi`,
+    modalKicker: 'MODEL HAKKINDA', modalTitle: 'Gerçek yerler.<br><em>Yaklaşık 3B.</em>',
+    modalBody: 'Bu harita Tuzla\'nın OpenStreetMap ilçe sınırını, bina tabanlarını, yollarını, arazi kullanımını ve ağaçlarını kullanır. Binalar fotoğrafik kopya değildir: kat yükseklikleri çoğunlukla tahminidir, cepheler ve kiremit çatılar yöresel tipolojiye göre prosedüreldir. Parklar ve ormanlardaki ağaçlar, trafik, trenler ve gemiler canlılık için simüle edilmiştir; gerçek zamanlı veri değildir. Güneşin konumu Tuzla\'nın enlemine göre hesaplanır.',
+    mData: 'HARİTA VERİSİ', mSat: 'UYDU', mElev: 'YÜKSEKLİK', mDone: 'TAMAM',
+    modalSmall: 'Uydu görüntüsü 2017 tarihlidir ve bugünkü haritayla örtüşmeyebilir. Arazi 1,35×, binalar varsayılan 1,25× dikey olarak abartılmıştır (ayarlardan değiştirilebilir). Bu model bir ölçüm veya navigasyon aracı değildir. Veri © OpenStreetMap katkıcıları (ODbL). EOX görüntüsü CC BY 4.0.',
+    modelNote: 'OSM TABANLARI · TAHMİNİ YÜKSEKLİKLER · SİMÜLE TRAFİK',
+    types: { suburb: 'Mahalle', town: 'İlçe merkezi', locality: 'Mevki', station: 'Tren istasyonu', stop: 'Durak', university: 'Üniversite', hospital: 'Hastane', school: 'Okul', park: 'Park', building: 'Bina', mosque: 'Cami', hotel: 'Otel', place: 'Öne çıkan yer', pharmacy: 'Eczane', supermarket: 'Market', restaurant: 'Restoran', cafe: 'Kafe', water: 'Gölet', wood: 'Koru', bus_station: 'Otogar / peron' },
+    places: {
+      sahil: ['Tuzla Sahil', 'KIYI', 'Tuzla\'nın Marmara Denizi ile buluştuğu sahil şeridi; yürüyüş yolları, balıkçı barınağı ve kıyı parkları.'],
+      marina: ['Viaport Marina', 'MARİNA', 'Yüzlerce teknenin bağlandığı marina, iskeleleri ve çevresindeki sahil yaşamı.'],
+      shipyards: ['Tersaneler', 'TERSANE BÖLGESİ', 'Türkiye\'nin en büyük tersane kümesi: rıhtımlara yanaşmış gemiler ve kuru havuzlar.'],
+      icmeler: ['İçmeler', 'MARMARAY', 'İçmeler Marmaray istasyonu ve çevresindeki yoğun konut dokusu.'],
+      park: ['Şelale Park', 'AYDINLI', 'Aydınlı\'da, iç kesim mahallelerinin arasında yeşil bir nefes.'],
+      osb: ['Tuzla OSB', 'ORGANİZE SANAYİ', 'Kimya ve deri organize sanayi bölgelerinin geniş çatılı fabrikaları.'],
+      sabanci: ['Sabancı Üniversitesi', 'ORHANLI', 'Orhanlı tepelerindeki kampüs ve çevresindeki ormanlık alan.'],
+      track: ['İstanbul Park', 'TEPEÖREN', 'Formula 1 pisti İstanbul Park ve çevresindeki kırsal peyzaj.']
+    },
+    districtName: 'Tuzla ilçesi', districtDesc: 'Marmara kıyısından iç kesim tepelerine, Tuzla\'nın haritalanmış sınırları içinde.'
+  },
+  en: {
+    htmlTitle: 'Tuzla, İstanbul — a 3D district model',
+    brandSub: 'ISTANBUL / TÜRKİYE', topMiddle: 'A LIVING OPEN-DATA DISTRICT MODEL', about: 'ABOUT THE DATA',
+    searchPh: 'Search neighbourhoods, mosques, schools, parks…', searchNone: 'No results',
+    kicker: 'A CLOSER LOOK AT', heroDesc: 'A real corner of İstanbul, from the Marmara shoreline to the hills inland: buildings, streets, shipyards and sea.',
+    viewing: 'YOU ARE VIEWING', coords: 'COORDINATES', district: 'VIEW THE DISTRICT', hint: 'DRAG TO ORBIT · SCROLL TO ZOOM · DOUBLE-CLICK A BUILDING',
+    explore: 'EXPLORE TUZLA', exploreSub: 'SELECT A PLACE TO FLY THERE', tour: 'AUTO TOUR', tourStop: 'STOP TOUR',
+    layers: 'MAP LAYERS', layersSub: 'SHOW / HIDE', lBuildings: '3D buildings', lStreets: 'Streets & rail', lTrees: 'Trees', lBoundary: 'District boundary', lTraffic: 'Traffic & trains', lShips: 'Ships & yachts', lLabels: 'Labels',
+    settings: 'VIEW SETTINGS', time: 'Time of day', now: 'NOW', timelapse: 'Time-lapse', heights: 'Building height', quality: 'Graphics quality', qLow: 'Low', qMedium: 'Medium', qHigh: 'High', animation: 'Animations',
+    walk: 'Street level', walkHint: 'DRAG TO LOOK · W A S D / ARROWS TO WALK · SHIFT TO RUN · ESC TO EXIT', walkExit: 'EXIT', shot: 'Screenshot', share: 'Copy a link to this view', full: 'Full screen', north: 'North up',
+    copied: 'Link copied to clipboard', saved: 'Screenshot saved',
+    loading: 'BUILDING TUZLA', lLoad: 'Loading the map, terrain and imagery…', lGeometry: 'Preparing geometry…', lBuildings: 'Raising buildings', lRoads: 'Drawing streets and street lights', lTreesP: 'Planting trees', lScene: 'Assembling the scene…',
+    fail: 'The 3D view could not start. Try a current, WebGL-enabled browser.',
+    bTitle: 'BUILDING', bUnnamed: 'Unnamed building', bFloors: 'Floors', bHeight: 'Height', bArea: 'Footprint', bGround: 'Ground level', bRoof: 'Roof', bSource: 'Source',
+    bKnownH: 'OSM height tag', bKnownL: 'OSM levels tag', bEstimated: 'Estimated (from size and use)', bFocus: 'ZOOM IN',
+    roofFlat: 'Flat', roofHip: 'Hipped (clay tile)', roofPyr: 'Pyramid (clay tile)',
+    styles: ['Residential', 'Office / commercial', 'Industrial / warehouse', 'Detached house'],
+    stats: (s) => `${s.buildings.toLocaleString('en')} buildings · ${s.trees.toLocaleString('en')} trees · ${s.mosques} mosques · ${s.ships} ships`,
+    modalKicker: 'A NOTE ON THE MODEL', modalTitle: 'Real places.<br><em>Approximate 3D.</em>',
+    modalBody: 'This map uses Tuzla\'s OpenStreetMap district boundary, building footprints, roads, land use and trees. Buildings are not photographic replicas: most heights are estimates, and façades and tiled roofs are procedural, following local building types. Trees in parks and forests, traffic, trains and ships are simulated for liveliness and are not real-time data. The sun position is computed for Tuzla\'s latitude.',
+    mData: 'MAP DATA', mSat: 'SATELLITE', mElev: 'ELEVATION', mDone: 'GOT IT',
+    modalSmall: 'Satellite imagery is from 2017 and may not match today\'s map. Terrain is exaggerated 1.35× and buildings 1.25× by default (adjustable in settings). This model is not a survey or navigation tool. Data © OpenStreetMap contributors (ODbL). EOX imagery is CC BY 4.0.',
+    modelNote: 'OSM FOOTPRINTS · ESTIMATED HEIGHTS · SIMULATED TRAFFIC',
+    types: { suburb: 'Neighbourhood', town: 'Town centre', locality: 'Locality', station: 'Rail station', stop: 'Stop', university: 'University', hospital: 'Hospital', school: 'School', park: 'Park', building: 'Building', mosque: 'Mosque', hotel: 'Hotel', place: 'Featured place', pharmacy: 'Pharmacy', supermarket: 'Supermarket', restaurant: 'Restaurant', cafe: 'Café', water: 'Pond', wood: 'Woodland', bus_station: 'Bus station' },
+    places: {
+      sahil: ['Tuzla Sahil', 'THE COAST', 'The shoreline where Tuzla meets the Sea of Marmara: promenades, the fishing harbour and coastal parks.'],
+      marina: ['Viaport Marina', 'THE MARINA', 'Hundreds of boats at their berths, the piers and the waterfront around them.'],
+      shipyards: ['Tersaneler', 'THE SHIPYARDS', 'Türkiye\'s largest cluster of shipyards: vessels moored at the quays and in dry docks.'],
+      icmeler: ['İçmeler', 'MARMARAY', 'The İçmeler Marmaray station and the dense housing around it.'],
+      park: ['Şelale Park', 'AYDINLI', 'A green landmark in Aydınlı, set among Tuzla\'s inland neighbourhoods.'],
+      osb: ['Tuzla OSB', 'INDUSTRIAL ZONE', 'The broad factory roofs of the chemical and leather organised industrial zones.'],
+      sabanci: ['Sabancı University', 'ORHANLI', 'The campus on the Orhanlı hills and the woodland around it.'],
+      track: ['İstanbul Park', 'TEPEÖREN', 'The İstanbul Park Formula 1 circuit and its rural landscape.']
+    },
+    districtName: 'Tuzla district', districtDesc: 'From the Marmara shoreline to the inland hills, within Tuzla\'s mapped boundary.'
+  }
+};
