@@ -15,7 +15,7 @@
 
 - [x] **Ticket 1.1** — Granular OSM Schema (`kind 0..7`, `roofShape`, `minH`, inner courtyards) in `scripts/extract_tuzla.py` + Pure-Python `scripts/enrich_osm.py` *(Completed in PR #1 / `191056e`)*
 - [x] **Ticket 1.2** — $O(1)$ Urban Topology Rasters (6m Road-Frontage Raster + 2.5m *Bitişik Nizam* Blind Party-Wall Spatial Hash + Inner Courtyards + 0-Byte `info` Bit-Packing) in `src/engine/geometry.worker.js` & `src/engine/materials.js`
-- [ ] **Ticket 1.3** — Sloped Terrain Plinths (*Subasman*), `min_height` Support, Gabled Roofs & `8×2` (`2048×512`) Facade Atlas Expansion in `src/engine/geometry.worker.js` & `src/engine/materials.js`
+- [x] **Ticket 1.3** — Sloped Terrain Plinths (*Subasman*), `min_height` Support, Gabled Roofs & `8×2` (`2048×512`) Facade Atlas Expansion in `src/engine/geometry.worker.js` & `src/engine/materials.js`
 - [ ] **Ticket 1.4** — Per-Chunk Distance/Shadow Culling, Fast Ray-Filtered GPU Picking & 8-Style UI Inspector in `src/engine/index.js`, `src/main.js` & `src/i18n.js`
 
 ---
