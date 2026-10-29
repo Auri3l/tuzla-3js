@@ -152,12 +152,12 @@ function showInfo(info) {
   $('#info-name').textContent = info.name || s.bUnnamed;
   const num = (v, d = 0) => v.toLocaleString(lang, { maximumFractionDigits: d });
   const rows = [
-    [s.styles[0] === 'Konut' ? 'Tip' : 'Type', s.styles[info.style] || s.styles[0]],
+    [s.bType, s.styles[info.style] || s.styles[0]],
     [s.bFloors, num(info.floors)],
     [s.bHeight, `${num(info.height, 1)} m`],
     [s.bArea, `${num(info.area)} m²`],
     [s.bGround, `${num(info.ground)} m`],
-    [s.bRoof, [s.roofFlat, s.roofHip, s.roofPyr][info.roof] || s.roofFlat],
+    [s.bRoof, s.roofs[info.roofType ?? info.roof] || s.roofs[0]],
     [s.bSource, info.known === 1 ? s.bKnownH : info.known === 2 ? s.bKnownL : s.bEstimated],
     ['GPS', fmt(info.lat, info.lon)]
   ];
