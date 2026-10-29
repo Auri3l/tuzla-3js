@@ -260,6 +260,7 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
     float ao = mix(.72, 1.0, smoothstep(-.2, 1.1, vFacade.y));
     if (vFacade.y < 0.0) {
       // subasman: level travertine / concrete block plinth absorbing the slope
+      msk = vec3(1.0, 0.0, .5);                                            // solid: no glass, flat relief
       vec2 pm = vec2(vFacade.x * 3.1, vFacade.y * 3.05);                  // metres
       float course = floor(pm.y / .45), jx = fract(pm.x / .9 + .5 * mod(course, 2.0)), jy = fract(pm.y / .45);
       float fwm = max(fwidth(pm.y), fwidth(pm.x)) * 1.2;
@@ -272,9 +273,32 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
       albedo = mix(albedo, vec3(.86, .84, .8), 1.0 - smoothstep(.13, .15 + fwm, ly));
       albedo *= mix(1.0, .6, smoothstep(.15, .17 + fwm, ly) * (1.0 - smoothstep(.17, .32, ly)));
       // ground contact: the plinth reaches 1.2 m below the terrain at its lowest corner
-      ao *= mix(.6, 1.0, smoothstep(1.2, 2.1, vInfo.z * 1000.0));
+      float gm = vInfo.z * 1000.0;
+      ao *= mix(.6, 1.0, smoothstep(1.2, 2.1, gm));
+      // soil splashback and a little moss along the foot of the plinth
+      float splash = (1.0 - smoothstep(1.1, 1.9, gm)) * (.55 + .45 * tzNoise(vec2(vFacade.x * 9.0, gm * 3.0) + id));
+      albedo = mix(albedo, albedo * vec3(.62, .58, .48), splash * .7);
+      albedo = mix(albedo, vec3(.24, .3, .18), splash * .25 * step(.6, tzNoise(vec2(vFacade.x * 4.0 + id, 1.0))));
+    } else {
+      // splashback dirt on the lowest half metre of the ground floor
+      float gy0 = vFacade.y * 3.05;
+      albedo *= mix(.82, 1.0, smoothstep(.0, .55, gy0) + (1.0 - msk.r));
     }
+    // ground-contact AO across the plinth and the bottom of the ground floor
+    ao *= mix(.8, 1.0, smoothstep(-.35, .25, vFacade.y));
+    // under-eave / cornice shadow on the top quarter of the highest floor
+    float topV = floors + .2;
+    ao *= mix(.78, 1.0, smoothstep(0.0, .35, topV - vFacade.y));
     albedo *= ao;
+    // vertical rain streaks washing down from window sills and from the cornice
+    if (vFacade.y > .6 && wallRole < 2.5) {
+      float sx = vFacade.x * 14.0, streakN = tzNoise(vec2(sx, id)) * tzNoise(vec2(sx * 2.3, id + 3.0));
+      float fadeS = clamp(1.0 - fwidth(sx) * .6, 0.0, 1.0);
+      float underSill = step(cell.y, .25) * smoothstep(.0, .25, cell.y) * step(.18, cell.x) * step(cell.x, .82) * step(.5, row); // strongest right under the sill
+      float underCornice = 1.0 - smoothstep(.0, .9, topV - .05 - vFacade.y);
+      float streak = smoothstep(.15, .55, streakN) * max(underSill, underCornice) * fadeS;
+      albedo *= 1.0 - .22 * streak * msk.r;
+    }
     // subtle weathering
     albedo *= .93 + .1 * tzNoise(vec2(vFacade.x * 1.7 + id, vFacade.y * .8));
     tzGlass = msk.g; tzRel = msk.b;

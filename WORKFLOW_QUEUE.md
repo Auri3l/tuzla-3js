@@ -25,7 +25,7 @@
 
 - [x] **Ticket 2.1** — High-DPI Multi-Channel PBR Atlas (`uFacade`, `uMask`, Normal/Roughness relief, mullion micro-bevels, brick/mosaic/travertine procedural synthesis) in `src/engine/materials.js` *(GitHub Issue #5)*
 - [x] **Ticket 2.2** — Analytical GLSL Ray-Box Interior Mapping (3D parallax ceilings, back walls, furniture silhouettes, curtains/blinds, and per-room warm/cool lighting behind window glass) in `src/engine/materials.js` *(GitHub Issue #6)*
-- [ ] **Ticket 2.3** — Photographic Facade Weathering (under-eave & under-balcony contact AO, ground splashback dirt gradient, vertical rain streaks below window sills, and cornice drip lines) in `src/engine/materials.js` *(GitHub Issue #7)*
+- [x] **Ticket 2.3** — Photographic Facade Weathering (under-eave & under-balcony contact AO, ground splashback dirt gradient, vertical rain streaks below window sills, and cornice drip lines) in `src/engine/materials.js` *(GitHub Issue #7)*
 
 ---
 
