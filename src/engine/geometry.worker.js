@@ -453,7 +453,7 @@ function build({ osm, terrain, ground, options }) {
       const ux = ((Q[1][0] - Q[0][0]) + (Q[2][0] - Q[3][0])) / 2, uz = ((Q[1][1] - Q[0][1]) + (Q[2][1] - Q[3][1])) / 2, ul = Math.hypot(ux, uz);
       const dxu = ux / ul, dzu = uz / ul, half = gable ? L / 2 : Math.max(0, (L - Wd) / 2);
       const rh = Math.min(gable ? 4.2 : 3.6, Math.max(1.3, Wd * 1000 * (gable ? .32 : .26))) / 1000;
-      const ry = top + rh, rrel = hKm + rh, drop = EAVE * rh / (Wd / 2);
+      const ry = top + rh, rrel = hKm + rh, drop = EAVE * rh / (Wd / 2); ridgeH = Math.max(ridgeH, rh);
       // gabled ridge ends sit exactly over the short-edge midpoints so the gable walls stay vertical; the roof runs on past them
       const R1 = gable ? [(Q[3][0] + Q[0][0]) / 2, ry, (Q[3][1] + Q[0][1]) / 2, rrel] : [qx - dxu * half, ry, qz - dzu * half, rrel];
       const R2 = gable ? [(Q[1][0] + Q[2][0]) / 2, ry, (Q[1][1] + Q[2][1]) / 2, rrel] : [qx + dxu * half, ry, qz + dzu * half, rrel];
@@ -485,12 +485,12 @@ function build({ osm, terrain, ground, options }) {
       eaves(Q, E, drop);
       return true;
     };
-    let built = false;
+    let built = false, ridgeH = 0;
     if (roofType === 1 || roofType === 3) {
       built = hipQuad([0, 1, 2, 3].map(k => [ring[k * 2], ring[k * 2 + 1]]), roofType === 3, roofStyle);
       if (built) stats.pitched++;
     } else if (roofType === 2) {
-      const rh = Math.min(3.4, Math.max(1.2, Math.sqrt(area) * .22)) / 1000;
+      const rh = Math.min(3.4, Math.max(1.2, Math.sqrt(area) * .22)) / 1000; ridgeH = rh;
       const apex = [cx, top + rh, cz, hKm + rh];
       const P = []; for (let i = 0; i < n; i++) P.push([ring[i * 2], ring[i * 2 + 1]]);
       const E = offsetPoly(P, EAVE), drop = EAVE * rh / (Math.sqrt(area) / 2000);
@@ -531,6 +531,62 @@ function build({ osm, terrain, ground, options }) {
       stats.flat++;
     }
 
+    // rooftop micro-architecture: 119 penthouse, 120 solar collector, 121 metal (tanks, HVAC), 122 skylight, 123 brick chimney
+    {
+      let ax = 1, az = 0, best = 0;
+      for (let i = 0; i < n; i++) { const j = (i + 1) % n, ex = ring[j * 2] - ring[i * 2], ez = ring[j * 2 + 1] - ring[i * 2 + 1], l = Math.hypot(ex, ez); if (l > best) { best = l; ax = ex / l; az = ez / l; } }
+      const inside = (x, z) => pointInRing(x, z, ring);
+      const roofY = top;
+      if (roofType === 0 && inside(cx, cz)) {
+        if (floors >= 4 && area >= 120 && style !== 2 && style !== 7) {
+          box(c, cx, cz, ax, az, .0014, .0014, roofY, roofY + .0024, wallC, bid, 119, base, iw);           // elevator machine room
+          stats.penthouses = (stats.penthouses || 0) + 1;
+        }
+        if ((style === 0 || style === 3 || style === 4) && floors <= 6 && r2 < .55) {
+          // günısı: south-facing tilted collector with a white hot-water cylinder along its top edge
+          const units = area > 220 ? 3 : area > 110 ? 2 : 1;
+          for (let u = 0; u < units; u++) {
+            const px = cx + (u - (units - 1) / 2) * .0024 + .0032 * hash2(bid, u), pz = cz + .0035;
+            if (!inside(px, pz) || !inside(px - .0011, pz + .0006) || !inside(px + .0011, pz + .0006)) continue;
+            const y0 = roofY + .0002, y1 = y0 + .0011, zf = pz + .0005, zb = pz - .0004;
+            const P = [[px - .001, y0, zf], [px + .001, y0, zf], [px + .001, y1, zb], [px - .001, y1, zb]];
+            quadN(c, P, [0, .77, .64], [0, 0, 2, 0, 2, 1.4, 0, 1.4], wallC, bid, 120, base, iw);
+            quadN(c, [P[1], P[0], P[3], P[2]], [0, -.77, -.64], [0, 0, 2, 0, 2, 1.4, 0, 1.4], wallC, bid, 121, base, iw);
+            // cylinder: 8 sides along x
+            const tr = .00025, ty = y1 + tr * .8, tz = zb - .0001, SEG = 8, b0 = c.v;
+            for (let k = 0; k <= SEG; k++) {
+              const th = k / SEG * Math.PI * 2, ny = Math.cos(th), nz2 = Math.sin(th);
+              vert(c, px - .0009, ty + ny * tr, tz + nz2 * tr, 0, ny, nz2, 0, k, wallC, bid, 121, ty - base, iw);
+              vert(c, px + .0009, ty + ny * tr, tz + nz2 * tr, 0, ny, nz2, 1.8, k, wallC, bid, 121, ty - base, iw);
+            }
+            for (let k = 0; k < SEG; k++) { const a = b0 + k * 2; c.idx.push3(a, a + 2, a + 1); c.idx.push3(a + 1, a + 2, a + 3); }
+            stats.solar = (stats.solar || 0) + 1;
+          }
+        }
+        if ((style === 2 || style === 6 || style === 7) && area > 450) {
+          const span = Math.sqrt(area) / 1000;
+          if (r3 < .5 || style === 6) {
+            const units = area > 2500 ? 3 : area > 1000 ? 2 : 1;
+            for (let u = 0; u < units; u++) {
+              const t = (u - (units - 1) / 2) * span * .28, px = cx + ax * t, pz = cz + az * t;
+              if (inside(px, pz)) box(c, px, pz, ax, az, .0015, .001, roofY, roofY + .0016, wallC, bid, 121, base, iw); // HVAC chiller
+            }
+          } else {
+            // linear roof monitor / skylight strips along the hall
+            for (const off of [-.25, .25]) {
+              const px = cx - az * span * off, pz = cz + ax * span * off;
+              if (inside(px, pz)) box(c, px, pz, ax, az, span * .32, .001, roofY, roofY + .0008, wallC, bid, 122, base, iw);
+            }
+          }
+          stats.hvac = (stats.hvac || 0) + 1;
+        }
+      } else if (roofType > 0 && area >= 65 && ridgeH > 0) {
+        // brick chimney rising 0.9 m above the middle of a roof slope
+        const i = Math.floor(r2 * n) % n, j = (i + 1) % n, mx = (ring[i * 2] + ring[j * 2]) / 2, mz = (ring[i * 2 + 1] + ring[j * 2 + 1]) / 2;
+        const px = cx + (mx - cx) * .45, pz = cz + (mz - cz) * .45;
+        if (inside(px, pz)) { box(c, px, pz, ax, az, .000275, .000275, top, top + ridgeH * .55 + .0009, wallC, bid, 123, base, iw); stats.chimneys = (stats.chimneys || 0) + 1; }
+      }
+    }
     stats.roofs[roofType]++;
     // occupancy for tree placement
     fillRing(ring, occ, OW, OH, bx0, bz0, OC, 1);

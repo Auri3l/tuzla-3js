@@ -354,7 +354,21 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
   } else {
     // roofs
     vec2 p = vFacade; style = rStyle;
-    if (style > 16.5 && style < 17.5) { albedo = tint * .62 * (.9 + .1 * tzNoise(p * 2.0)); tzRough = .9; }          // eave soffit / fascia, in shade
+    if (style > 18.5) {
+      // rooftop micro-architecture (uv in metres)
+      if (style < 19.5) { albedo = tint * .92 * (.9 + .12 * tzNoise(p * 1.3 + id)); tzRough = .9; }                       // machine room
+      else if (style < 20.5) {                                                                                          // solar collector
+        float g = max(step(.9, fract(p.x * 2.5)), step(.92, fract(p.y * 1.2)));
+        albedo = mix(vec3(.05, .08, .16), vec3(.55, .57, .6), g * clamp(1.0 - fwidth(p.x) * 3.0, 0.0, 1.0)); tzRough = .22;
+      } else if (style < 21.5) { albedo = vec3(.8, .81, .8) * (.9 + .1 * tzNoise(p * 4.0)); tzRough = .4; }               // tank / HVAC
+      else if (style < 22.5) { albedo = vec3(.2, .27, .3); tzRough = .12; }                                              // skylight glazing
+      else {                                                                                                            // brick chimney
+        float course = floor(p.y / .075), j = fract(p.x / .22 + .5 * mod(course, 2.0));
+        float mortar = max(step(.88, fract(p.y / .075)), step(.92, j)) * clamp(1.0 - fwidth(p.y) * 8.0, 0.0, 1.0);
+        albedo = mix(vec3(.45, .2, .14) * (.85 + .3 * tzHash(vec2(floor(p.x / .22), course))), vec3(.7, .67, .6), mortar);
+        tzRough = .9;
+      }
+    } else if (style > 16.5 && style < 17.5) { albedo = tint * .62 * (.9 + .1 * tzNoise(p * 2.0)); tzRough = .9; }          // eave soffit / fascia, in shade
     else if (style > 17.5 && style < 18.5) { albedo = mix(tint, vec3(.8, .79, .76), .6) * (.88 + .14 * tzNoise(p * 3.0 + id)); tzRough = .92; } // parapet coping
     else if (style > 13.5 && style < 14.5) { albedo = tint * (.8 + .2 * vFacade.y / 6.0); tzRough = .45; }       // dome
     else if (style > 14.5 && style < 15.5) { albedo = tint * (.9 + .1 * step(.5, fract(vFacade.y * 6.0))); tzRough = .7; } // minaret
