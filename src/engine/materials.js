@@ -428,8 +428,11 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
     tzRough = mix(.92, .12, tzGlass);
     // lit windows after dusk
     float lit = step(h, mix(.12, .4, fract(seed * 13.7)) * (fl < .5 ? 1.4 : 1.0));
-    vec3 warm = mix(vec3(1.0, .72, .42), vec3(1.0, .88, .7), fract(h * 31.0));
-    if (fract(h * 17.0) < .12) warm = vec3(.72, .85, 1.0);
+    // room light temperature: tungsten 2700K, warm white 3500K, the blue flicker of a TV (6500K), daylight LED
+    float tk = fract(h * 31.0);
+    vec3 warm = tk < .42 ? vec3(1.0, .66, .36) : tk < .74 ? vec3(1.0, .8, .58) : tk < .88 ? vec3(.55, .7, 1.0) * (.55 + .3 * sin(uTime * 9.0 + h * 40.0) + .15 * sin(uTime * 23.0 + h * 9.0)) : vec3(.9, .93, 1.0);
+    // apartment stairwell bay: dim hallway glow on most floors
+    if ((style < .5 || style > 3.5 && style < 4.5) && wallRole < 1.5 && fl > .5 && abs(mod(bay, 5.0) - floor(seed * 5.0)) < .5) { lit = step(.35, fract(h * 7.1)); warm = vec3(.95, .9, .72) * .45; }
     float glowK = 1.0;
     // interior rooms behind the glass, faded out beyond 1.8 km
     vec3 toFrag = vWPos - cameraPosition; float camDist = length(toFrag);
@@ -455,7 +458,20 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
       glowK = mix(1.0, (.55 + 1.6 * lamp) * dot(room, vec3(.4)) * 1.6, near);
     }
     tzGlow = warm * lit * smoothstep(.3, .9, tzGlass) * uNight * (.45 + .5 * fract(h * 5.3)) * glowK;
+    // street-front shops stay brightly lit through the evening: vitrine, illuminated fascia sign, pharmacy / market accents
+    if (row == 0.0 && wallRole < .5 && shop && vFacade.y > 0.0) {
+      tzGlow = vec3(1.0, .86, .66) * smoothstep(.3, .9, tzGlass) * uNight * .8 * max(glowK, .8);
+      if (cell.y > .72 && cell.y < .94 && cell.x > .04 && cell.x < .96) tzGlow += mix(awn, vec3(1.0), .35) * uNight * .55;
+      float ac = fract(h * 53.0);
+      if (ac < .1 && cell.x > .78 && cell.x < .93 && cell.y > .5 && cell.y < .68) {
+        vec3 sc = ac < .045 ? vec3(1.0, .12, .1) : vec3(.15, 1.0, .35);   // red "E" eczane / green market sign
+        float crs = step(abs(cell.x - .855), .018) + step(abs(cell.y - .59), .02);
+        albedo = mix(vec3(.9), sc, clamp(crs, 0.0, 1.0)) * .6; tzGlow += mix(vec3(.8), sc, clamp(crs, 0.0, 1.0)) * uNight * 1.3;
+      }
+    }
     albedo = mix(albedo, albedo * .45, tzGlass * uNight);
+    // floodlit mosque hall: warm wash from ground uplights fading up the stone
+    if (mosqueW) tzGlow += vec3(1.0, .82, .58) * uNight * .16 * (1.0 - msk.g) * (1.0 - smoothstep(.0, floors + .5, vFacade.y) * .6);
   } else {
     // roofs
     vec2 p = vFacade; style = rStyle;
@@ -470,7 +486,7 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
       else if (style > 24.5) {                                                                                          // canvas awning
         float stripe = arche > .5 && arche < 1.5 ? step(.5, fract(p.x * 7.0)) : 0.0;
         albedo = mix(tint, vec3(.93, .9, .82), stripe) * (.88 + .12 * tzNoise(p * vec2(9.0, 3.0) + id)) * (vWNorm.y < -.3 ? .7 : 1.0);
-        tzRough = .85;
+        tzRough = .85; tzGlow = tint * uNight * (vWNorm.y < -.3 ? .25 : .06);                                         // lit from the vitrine below
       }
       else if (style > 23.5) { albedo = vec3(.85, .64, .26) * (.85 + .3 * max(0.0, vWNorm.y)); tzRough = .25; }          // gilded bronze alem
       else {                                                                                                            // brick chimney
@@ -481,19 +497,25 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
       }
     } else if (style > 16.5 && style < 17.5) { albedo = tint * .62 * (.9 + .1 * tzNoise(p * 2.0)); tzRough = .9; }          // eave soffit / fascia, in shade
     else if (style > 17.5 && style < 18.5) { albedo = mix(tint, vec3(.8, .79, .76), .6) * (.88 + .14 * tzNoise(p * 3.0 + id)); tzRough = .92; } // parapet coping
+    else if (style > 13.5 && style < 14.5 && floors < .5) { albedo = tint * (.8 + .2 * vFacade.y / 6.0); tzRough = .45; } // landmark shells
+    else if (style > 14.5 && style < 15.5 && floors < .5) { albedo = tint * (.9 + .1 * step(.5, fract(vFacade.y * 6.0))); tzRough = .7; }
     else if (style > 13.5 && style < 14.5) {
-      // lead dome / külah: standing-seam ribs on every facet edge and a half-way seam, horizontal sheet laps, patina
+      // mosque lead dome / külah (packed floors = 1): standing-seam ribs on every facet edge and a half-way seam, horizontal sheet laps, patina
       float fu = fract(p.x * 2.0), fwr = fwidth(p.x) * 2.0, fade = clamp(1.0 - fwr * 3.0, 0.0, 1.0);
       float rib = 1.0 - smoothstep(.0, .06 + fwr, min(fu, 1.0 - fu));
       float lap = 1.0 - smoothstep(.0, .04 + fwidth(p.y * 3.0), abs(fract(p.y * 3.0) - .5) - .44);
       albedo = tint * (.84 + .1 * tzNoise(p * vec2(3.0, 5.0) + id)) * (1.0 + (.3 * rib - .08 * (1.0 - lap)) * fade);
       tzRel = .5 + .35 * rib * fade; tzRough = .4;
+      // floodlit at night: warm uplighting strongest near the springing of the dome
+      tzGlow = vec3(1.0, .8, .55) * uNight * (.1 + .22 * (1.0 - smoothstep(.0, .012, vInfo.z - .003)));
     } else if (style > 14.5 && style < 15.5) {
       // minaret ashlar: courses every 0.4 m with staggered joints, a little weathering
       float course = floor(p.y * 6.0), fj = fract(p.x * 2.0 + .5 * mod(course, 2.0)), fwc = fwidth(p.y * 6.0);
       float joint = max(1.0 - smoothstep(.0, .05 + fwc, fract(p.y * 6.0)), 1.0 - smoothstep(.0, .04 + fwidth(p.x * 2.0), min(fj, 1.0 - fj)));
       albedo = tint * (.92 + .1 * tzHash(vec2(floor(p.x * 2.0 + .5 * mod(course, 2.0)), course) + id)) * (1.0 - .18 * joint * clamp(1.0 - fwc * 3.0, 0.0, 1.0));
       tzRel = .5 - .2 * joint; tzRough = .8;
+      // floodlit minaret: soft wash on the shaft, the şerefe corbel and balustrade ring glowing brightest
+      tzGlow = vec3(1.0, .84, .62) * uNight * (.09 + .4 * step(.3, abs(vWNorm.y)));
     }
     else if ((style > 10.5 && style < 12.5) || (style > 15.5 && style < 16.5)) {
       // clay tiles: rows along the slope with staggered joints

@@ -71,7 +71,7 @@
 *Playbook: [tickets/PHASE7_PLAYBOOK.md](./tickets/PHASE7_PLAYBOOK.md)*
 
 - [x] **Ticket 7.1** — Ground-Floor Street Life & Shopfront Detailing (3D sloped canvas awnings, recessed shop doorways, rooftop/wall AC condenser units, and parcel boundary walls) in `src/engine/geometry.worker.js` & `src/engine/materials.js` *(GitHub Issue #22)*
-- [ ] **Ticket 7.2** — Night-Time Photorealism (Multi-temperature interior rooms `2400K`–`6500K`, illuminated ground-floor shop vitrines, red/green *Eczane* & shop signs, floodlit mosque domes/minarets, and aviation warning beacons on cranes/towers) in `src/engine/materials.js` *(GitHub Issue #23)*
+- [x] **Ticket 7.2** — Night-Time Photorealism (Multi-temperature interior rooms `2400K`–`6500K`, illuminated ground-floor shop vitrines, red/green *Eczane* & shop signs, floodlit mosque domes/minarets, and aviation warning beacons on cranes/towers) in `src/engine/materials.js` *(GitHub Issue #23)*
 
 ---
 
