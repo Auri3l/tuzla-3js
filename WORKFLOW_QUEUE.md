@@ -42,7 +42,7 @@
 *Playbook: [tickets/PHASE4_PLAYBOOK.md](./tickets/PHASE4_PLAYBOOK.md)*
 
 - [x] **Ticket 4.1** — Coastal & Historical Tuzla Mahalles (*Postane, Cami, İstasyon, Evliya Çelebi*): Coastal boutique retail awnings, timber/pastel *Tuzla Yalı/Konak* houses, and historic masonry trim in `src/engine/geometry.worker.js` & `src/engine/materials.js` *(GitHub Issue #11)*
-- [ ] **Ticket 4.2** — High-Density Apartments & Mass Housing (*Aydıntepe, İçmeler, Yayla, Şifa, Mimar Sinan, Orta*): TOKİ/Kiptaş symmetrical stepped blocks, 1980s–90s *Bitişik Nizam* mosaic apartments, and 2010s anthracite-frame *Site* blocks *(GitHub Issue #12)*
+- [x] **Ticket 4.2** — High-Density Apartments & Mass Housing (*Aydıntepe, İçmeler, Yayla, Şifa, Mimar Sinan, Orta*): TOKİ/Kiptaş symmetrical stepped blocks, 1980s–90s *Bitişik Nizam* mosaic apartments, and 2010s anthracite-frame *Site* blocks *(GitHub Issue #12)*
 - [ ] **Ticket 4.3** — Northern Suburban Villas & Estates (*Tepeören, Akfırat, Orhanlı, Fatih, Anadolu*): Twin/detached modern villas, natural stone cladding, pergola terraces, and low-rise gated compound palettes *(GitHub Issue #13)*
 - [ ] **Ticket 4.4** — Industrial OSBs & Logistics (*İAYOSB, BOSB, KOSB, TOSB, Deri OSB*): Corrugated sandwich panels, sawtooth north-light factory roofs, loading dock canopies, and admin glass annexes *(GitHub Issue #14)*
 

@@ -256,7 +256,10 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
       if (abs(vWNorm.y) > .5) { tex = vec3(.82); msk = vec3(.3, 0.0, .5); }                       // slab soffit / top
       else if (cy < .07) { tex = vec3(.88); msk = vec3(.15, 0.0, .78); }                          // slab edge
       else if (cy < .38) {
-        if (style > 3.5 || seed > .55) { tex = vec3(.96); msk = vec3(1.0, 0.0, .55); }            // solid parapet
+        if (arche > 3.5 && arche < 4.5) {                                                          // frameless glass railing with an anthracite cap
+          float cap = step(.34, cy);
+          tex = mix(vec3(.45, .58, .6), vec3(.17, .18, .19), cap); msk = vec3(0.0, .55 * (1.0 - cap), mix(.4, .75, cap));
+        } else if (style > 3.5 || seed > .55) { tex = vec3(.96); msk = vec3(1.0, 0.0, .55); }            // solid parapet
         else {
           float bar = step(.72, fract(vFacade.x * 14.0)) + step(.33, cy);
           tex = mix(vec3(.13, .13, .14), vec3(.36, .37, .38), clamp(bar, 0.0, 1.0)); msk = vec3(0.0, 0.0, bar > .5 ? .75 : .3); // railing, dark gap
@@ -280,6 +283,37 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
       if (sh > .5 && cell.y > .28 && cell.y < .84) {
         vec3 shc = fract(seed * 5.7) < .4 ? vec3(.3, .42, .3) : fract(seed * 5.7) < .7 ? vec3(.24, .4, .44) : vec3(.42, .3, .22);
         tex = shc * (.85 + .15 * step(.5, fract(cell.y * 14.0))); msk = vec3(0.0, 0.0, .7);
+      }
+    }
+    // dense mahalles (Phase 4.2): 2 1980s-90s mosaic apartments, 3 TOKİ estates, 4 yeni nesil site
+    if (arche > 1.5 && arche < 4.5 && wallRole < 2.5 && vFacade.y > 0.0) {
+      bool plaster = msk.r > .5 && msk.g < .1, upper = vFacade.y > 1.0;
+      if (arche < 2.5) {
+        // mosaic tile cladding on the spandrels below the windows (or the whole wall on some blocks)
+        if (plaster && upper && (cell.y < .28 || seed < .35)) {
+          vec2 pm = vec2(vFacade.x * 3.0, vFacade.y * 3.05) * 10.0, tc = floor(pm), tf = fract(pm);
+          float fwt = max(fwidth(pm.x), fwidth(pm.y)), fade = clamp(1.5 - fwt * 2.0, 0.0, 1.0);
+          float grout = 1.0 - smoothstep(.0, .08 + fwt, min(min(tf.x, 1.0 - tf.x), min(tf.y, 1.0 - tf.y)));
+          vec3 mos = fract(seed * 3.7) < .45 ? vec3(.62, .38, .3) : fract(seed * 3.7) < .75 ? vec3(.55, .62, .66) : vec3(.72, .64, .52);
+          mos *= .86 + .22 * mix(.5, tzHash(tc + id), fade);
+          tex = mix(mos, vec3(.8), grout * .6 * fade); msk = vec3(0.0, 0.0, mix(.55, .4, grout * fade));
+        }
+      } else if (arche < 3.5) {
+        // estate accent bands: ground floor, top floor and the stair-core bay column in a shared accent colour
+        float ak = fract(seed * 3.1);
+        vec3 acc = ak < .4 ? vec3(.71, .4, .29) : ak < .7 ? vec3(.54, .36, .27) : vec3(.77, .52, .33);
+        bool band = fl < .5 || (fl > floors - 1.5 && vFacade.y < floors + .02) || abs(mod(bay, 4.0) - floor(fract(seed * 7.9) * 4.0)) < .5;
+        if (plaster && band && wallRole < 1.5) tint = pow(acc, vec3(2.2));
+        if (vFacade.y > floors + .02) tex = mix(tex, acc * 1.1, .7); // coloured parapet band
+      } else {
+        // yeni nesil site: anthracite panel columns, frames and top band; glass balcony railings
+        vec3 anth = vec3(.17, .18, .19);
+        bool col = mod(bay + floor(seed * 3.0), 3.0) < .5 && wallRole < 1.5;
+        if (plaster && upper && (col || vFacade.y > floors + .02)) { tex = anth; msk = vec3(0.0, 0.0, .55); }
+        else if (msk.r < .2 && msk.g < .1 && row > .5) {
+          if (cell.y > .23 && cell.y < .39 && cx > .1 && cx < .9) { tex = mix(vec3(.5, .62, .64), anth, step(.36, cell.y)); msk = vec3(0.0, step(cell.y, .36) * .5, .4); }
+          else tex = anth;
+        }
       }
     }
     // shop awnings take a per-shop colour; coastal awnings are striped canvas

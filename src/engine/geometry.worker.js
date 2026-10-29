@@ -136,6 +136,11 @@ const BAY = [3.1, 2.6, 6, 3.4, 3.0, 3.6, 4.5, 8];
 // Phase 4 mahalle groups and palettes
 const COASTAL_MAH = new Set(['Postane', 'Cami', 'İstasyon', 'Evliya Çelebi', 'Tuzla']);
 const COASTAL_WALLS = ['#efe2c4', '#e8cf9e', '#f3ece0', '#e2b98f', '#ead9bd', '#d9a888', '#f1e6cf', '#dcc29a'].map(hex);
+const DENSE_MAH = new Set(['Aydıntepe', 'İçmeler', 'Yayla', 'Şifa', 'Mimar Sinan', 'Orta', 'Aydınlı', 'Evliya Çelebi']);
+// TOKİ / Kiptaş estates: warm sand and dual-tone beige plaster, one colour per estate
+const ESTATE_WALLS = ['#e8d5b0', '#e6c9a8', '#efe0c6', '#dcc0a0', '#e9dccb', '#e3cdb4'].map(hex);
+// yeni nesil site: white and light grey composite panels (anthracite trim comes from the shader)
+const SITE_WALLS = ['#f2f2ef', '#e9eaea', '#dcdedd', '#f4f1ea', '#d2d4d4', '#e6e4df'].map(hex);
 // Tersaneler (shipyard bay): 40.822..40.840 N, 29.275..29.298 E
 const [SYX0, SYZ1] = toWorld(40.822, 29.275), [SYX1, SYZ0] = toWorld(40.840, 29.298);
 const inShipyard = (x, z) => x > SYX0 && x < SYX1 && z > SYZ0 && z < SYZ1;
@@ -266,6 +271,7 @@ function build({ osm, terrain, ground, options }) {
   const tTopo = performance.now();
   const { isNearRoad, rings, holesOf, partyWall, dup } = urbanTopology(osm.roads, osm.buildings, terrain.bounds);
   stats.topologyMs = Math.round(performance.now() - tTopo);
+  const estateOf = estates(osm.buildings, rings, dup);
   for (let bid = 0; bid < total; bid++) {
     if (bid % 2000 === 0) progress('buildings', bid / total);
     const b = osm.buildings[bid];
@@ -279,6 +285,10 @@ function build({ osm, terrain, ground, options }) {
     const r1 = hash2(cx * 13.1, cz * 7.7), r2 = hash2(cx + 3.3, cz - 9.1), r3 = hash2(cz * 5.3, cx * 2.9);
     const lc = landAt(cx, cz);
     const industrial = b[3] === 2 || (lc === 1 && area > 250) || area > 3200;
+    const mah = mahalleOf(cx, cz), dense = DENSE_MAH.has(mah);
+    // TOKİ / Kiptaş estate: the whole group shares one hash for palette, height and roof
+    const est = dense && !industrial && estateOf[bid] >= 0 ? estateOf[bid] : -1;
+    const eh = est >= 0 ? hash2(est * .731, est * .117 + 4.1) : 0;
 
     // heights in metres: OSM tags first, otherwise an estimate quantised to floors
     let floorH = industrial ? 5 : 3.05, floors, heightM, known = 0;
@@ -294,6 +304,7 @@ function build({ osm, terrain, ground, options }) {
       else if (area < 1600) floors = 5 + Math.round(r1 * 5);
       else floors = 4 + Math.round(r1 * 4);
       heightM = floors * floorH + (industrial ? 0 : .6);
+      if (est >= 0) { floors = 5 + Math.floor(eh * 7) + (r1 > .8); heightM = floors * floorH + .6; }
     }
     // wall topology: 0 street front, 1 side, 2 rear/courtyard, 3 blind party wall
     const positive = sa >= 0, roles = new Uint8Array(n);
@@ -332,6 +343,9 @@ function build({ osm, terrain, ground, options }) {
     else if (floors >= 9) style = 1;
     else if (floors <= 2 && area < 200 || kind === 3 && floors <= 3) style = 3;
     else style = (partyLen > perim * .18 && floors >= 3) || r2 < .18 ? 4 : 0;
+    // dense mahalles: estates and new residential towers are plastered apartment blocks, not curtain walls
+    const site = dense && est < 0 && (kind === 1 || kind === 0 && b[2]) && floors >= 5 && style !== 4 && (floors >= 9 || r3 > .62);
+    if ((est >= 0 || site) && style === 1) style = 0;
 
     // roof type: 0 flat, 1 hipped, 2 pyramidal, 3 gabled; explicit roofShape (b[6]) wins over heuristics
     const convex = isConvex(ring), quad = n === 4 && convex, pitchable = !holes && !industrial && convex;
@@ -340,6 +354,8 @@ function build({ osm, terrain, ground, options }) {
     if (rs === 2) roofType = !pitchable ? 0 : quad ? 1 : n <= 10 ? 2 : 0;
     else if (rs === 3) roofType = !pitchable ? 0 : quad ? 3 : n <= 10 ? 2 : 0;
     else if (rs === 4) roofType = pitchable && n <= 12 ? 2 : 0;
+    else if (rs === 0 && est >= 0) roofType = pitchable && n <= 10 && eh < .55 ? (quad ? 1 : 2) : 0;
+    else if (rs === 0 && site) roofType = 0;
     else if (rs === 0 && pitchable && style !== 1 && style !== 6 && n <= 10 && area < 1300 && r3 < (style === 3 ? .92 : .78)) roofType = quad ? (style === 3 && r3 < .35 ? 3 : 1) : 2;
     // L-shaped plans (6 orthogonal corners): two overlapping hipped wings (roofType 4 while building, reported as hipped)
     let lWings = null;
@@ -350,18 +366,20 @@ function build({ osm, terrain, ground, options }) {
     const PARAPET = .00055, parapet = roofType === 0 && !industrial && !holes && area >= 55 && style !== 2 && style !== 7;
 
     // mahalle archetypes (Phase 4)
-    const mah = mahalleOf(cx, cz);
-    let arche = 0, palette = STYLE_WALLS[style];
+    let arche = 0, palette = STYLE_WALLS[style], pr = r2;
     if (COASTAL_MAH.has(mah) && cz > 5.8 && (style === 0 || style === 3 || style === 4 || style === 6)) { arche = 1; palette = COASTAL_WALLS; }
+    else if (est >= 0) { arche = 3; palette = ESTATE_WALLS; pr = eh; }
+    else if (site) { arche = 4; palette = SITE_WALLS; }
+    else if (dense && style === 4) arche = 2;
     stats.arche = stats.arche || [0, 0, 0, 0, 0, 0, 0, 0]; stats.arche[arche]++;
 
     // colours
     stats.styles[style]++;
-    let wallC = tagColour(b[5]) || pick(palette, r2);
+    let wallC = tagColour(b[5]) || pick(palette, pr);
     let roofC = tagColour(b[4]);
     if (!roofC) {
       const s = sat(cx, cz);
-      if (roofType) roofC = pick(TILES, r3);
+      if (roofType) roofC = pick(TILES, est >= 0 ? eh * 3.7 % 1 : r3);
       else if (industrial) roofC = s ? mix(pick(METAL, r3), s, area > 2500 ? .75 : .45) : pick(METAL, r3);
       else roofC = s ? mix(pick(FLAT, r3), s, .3) : pick(FLAT, r3);
     }
@@ -374,7 +392,7 @@ function build({ osm, terrain, ground, options }) {
     // stone/concrete plinth absorbs the slope down to 1.2 m below each corner
     const hKm = heightM / 1000, base = gMax + .0003, top = base + hKm;
     const minKm = Math.min(b[7] || 0, heightM - 1) / 1000, floating = minKm > 0;
-    const seed = r1;
+    const seed = est >= 0 ? eh * 5.3 % 1 : r1; // estates share window lighting, balcony and accent choices
     const c = getChunk(cx, cz);
 
     // walls (each edge spans a whole number of window bays)
@@ -841,6 +859,44 @@ function build({ osm, terrain, ground, options }) {
 
 /* ------------------------------------------------ urban topology rasters */
 // Kept out of build() so V8 optimises these hot loops on their own.
+/**
+ * Mass-housing estates (TOKİ / Kiptaş): mid-size blocks of near-identical footprint repeated within
+ * 150 m. Similar neighbours are linked and each connected group shares its lowest building id,
+ * which seeds the estate's coordinated palette, height and roofs. Returns -1 for non-estate buildings.
+ */
+function estates(buildings, rings, dup) {
+  const N = buildings.length, cxs = new Float32Array(N), czs = new Float32Array(N), ar = new Float32Array(N), nv = new Uint8Array(N);
+  const cand = [], G = .15, cells = new Map();
+  for (let i = 0; i < N; i++) {
+    const r = rings[i], k = buildings[i][3];
+    if (dup[i] || r.length < 8 || (k !== 1 && k !== 0)) continue;
+    const a = Math.abs(signedArea(r)) * 1e6; if (a < 280 || a > 750) continue;
+    let x = 0, z = 0; for (let j = 0; j < r.length; j += 2) { x += r[j]; z += r[j + 1]; }
+    cxs[i] = x / (r.length / 2); czs[i] = z / (r.length / 2); ar[i] = a; nv[i] = Math.min(255, r.length / 2);
+    const key = Math.floor(cxs[i] / G) * 65536 + Math.floor(czs[i] / G);
+    (cells.get(key) || cells.set(key, []).get(key)).push(i); cand.push(i);
+  }
+  const parent = new Int32Array(N).fill(-1), deg = new Uint8Array(N);
+  const find = i => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+  for (const i of cand) parent[i] = i;
+  for (const i of cand) {
+    const gx = Math.floor(cxs[i] / G), gz = Math.floor(czs[i] / G);
+    for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+      const L = cells.get((gx + ox) * 65536 + gz + oz); if (!L) continue;
+      for (const j of L) {
+        if (j <= i || Math.abs(nv[i] - nv[j]) > 2 || Math.abs(ar[i] / ar[j] - 1) > .12) continue;
+        if ((cxs[i] - cxs[j]) ** 2 + (czs[i] - czs[j]) ** 2 > G * G) continue;
+        deg[i] = Math.min(255, deg[i] + 1); deg[j] = Math.min(255, deg[j] + 1);
+        const a = find(i), b = find(j); if (a !== b) parent[Math.max(a, b)] = Math.min(a, b);
+      }
+    }
+  }
+  const out = new Int32Array(N).fill(-1), size = new Map();
+  for (const i of cand) if (deg[i] >= 3) { const r = find(i); size.set(r, (size.get(r) || 0) + 1); }
+  for (const i of cand) if (deg[i] >= 3 && size.get(find(i)) >= 6) out[i] = find(i);
+  return out;
+}
+
 function urbanTopology(roads, buildings, [bx0, bz0, bx1, bz1]) {
   const total = buildings.length;
   // road frontage raster: 6 m cells stamped within 18 m of driveable and pedestrian centrelines (12 m stride)
