@@ -78,5 +78,5 @@
 ## Phase 8: Two-Tier Chunk LOD Streaming & Standalone Offline Packaging
 *Playbook: [tickets/PHASE8_PLAYBOOK.md](./tickets/PHASE8_PLAYBOOK.md)*
 
-- [ ] **Ticket 8.1** — Two-Tier Chunk Geometry Split (`chunk.shell` vs. `chunk.details` distance-culled at `< 1.8 km`) for locked 60 FPS in `src/engine/geometry.worker.js` & `src/engine/index.js` *(GitHub Issue #24)*
-- [ ] **Ticket 8.2** — Final Production & Standalone Offline Bundle Verification (`npm run build` + `python scripts/build_standalone.py` $\rightarrow$ `tuzla-3d-preview.html`) *(GitHub Issue #25)*
+- [x] **Ticket 8.1** — Two-Tier Chunk Geometry Split (`chunk.shell` vs. `chunk.details` distance-culled at `< 1.8 km`) for locked 60 FPS in `src/engine/geometry.worker.js` & `src/engine/index.js` *(GitHub Issue #24)*
+- [x] **Ticket 8.2** — Final Production & Standalone Offline Bundle Verification (`npm run build` + `python scripts/build_standalone.py` $\rightarrow$ `tuzla-3d-preview.html`) *(GitHub Issue #25)*

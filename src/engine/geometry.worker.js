@@ -202,10 +202,12 @@ function build({ osm, terrain, ground, options }) {
   /* ---------------------------------------------------------- buildings */
   const CH = options.chunkSize || 1.6;
   const chunks = new Map();
-  const getChunk = (x, z) => {
-    const key = Math.floor((x - bx0) / CH) + ',' + Math.floor((z - bz0) / CH);
+  // two buffer sets per chunk with the same vertex layout: the shell (walls, roofs, domes, landmarks) drawn to the
+  // horizon, and details (balconies, awnings, canopies, rooftop clutter) drawn only within 1.8 km
+  const getChunk = (x, z, detail = false) => {
+    const key = Math.floor((x - bx0) / CH) + ',' + Math.floor((z - bz0) / CH) + (detail ? ':d' : '');
     let c = chunks.get(key);
-    if (!c) { c = { key, pos: new Buf(Float32Array), nor: new Buf(Int8Array), uv: new Buf(Float32Array), col: new Buf(Uint8Array), info: new Buf(Float32Array), idx: new Buf(Uint32Array), v: 0 }; chunks.set(key, c); }
+    if (!c) { c = { key, detail, pos: new Buf(Float32Array), nor: new Buf(Int8Array), uv: new Buf(Float32Array), col: new Buf(Uint8Array), info: new Buf(Float32Array), idx: new Buf(Uint32Array), v: 0 }; chunks.set(key, c); }
     return c;
   };
   const meta = new Float32Array(osm.buildings.length * 12);
@@ -422,7 +424,7 @@ function build({ osm, terrain, ground, options }) {
     const hKm = heightM / 1000, base = gMax + .0003, top = base + hKm;
     const minKm = Math.min(b[7] || 0, heightM - 1) / 1000, floating = minKm > 0;
     const seed = est >= 0 ? eh * 5.3 % 1 : r1; // estates share window lighting, balcony and accent choices
-    const c = getChunk(cx, cz);
+    const c = getChunk(cx, cz), cd = getChunk(cx, cz, true); // shell / distance-culled details
 
     // walls (each edge spans a whole number of window bays)
     const bay = BAY[style];
@@ -472,9 +474,9 @@ function build({ osm, terrain, ground, options }) {
           const A = [px - ex * w, yt, pz - ez * w], B = [px + ex * w, yt, pz + ez * w];
           const F = [B[0] + nx * P, yf, B[2] + nz * P], E = [A[0] + nx * P, yf, A[2] + nz * P];
           const sl = Math.hypot(P, .0005), up = [nx * .0005 / sl, P / sl, nz * .0005 / sl], colr = pick(AWNINGS, hk / .45);
-          quadN(c, [A, B, F, E], up, [0, 0, 1, 0, 1, 1, 0, 1], colr, bid, 125, base, iw);
-          quadN(c, [B, A, E, F], [-up[0], -up[1], -up[2]], [1, 0, 0, 0, 0, 1, 1, 1], colr, bid, 125, base, iw);
-          quadN(c, [E, F, [F[0], yv, F[2]], [E[0], yv, E[2]]], [nx, 0, nz], [0, 1, 1, 1, 1, 1.2, 0, 1.2], colr, bid, 125, base, iw);
+          quadN(cd, [A, B, F, E], up, [0, 0, 1, 0, 1, 1, 0, 1], colr, bid, 125, base, iw);
+          quadN(cd, [B, A, E, F], [-up[0], -up[1], -up[2]], [1, 0, 0, 0, 0, 1, 1, 1], colr, bid, 125, base, iw);
+          quadN(cd, [E, F, [F[0], yv, F[2]], [E[0], yv, E[2]]], [nx, 0, nz], [0, 1, 1, 1, 1, 1.2, 0, 1.2], colr, bid, 125, base, iw);
           stats.awnings = (stats.awnings || 0) + 1;
         }
       }
@@ -482,9 +484,9 @@ function build({ osm, terrain, ground, options }) {
         const j = (ci + 1) % n, ax = ring[ci * 2], az = ring[ci * 2 + 1], ex = (ring[j * 2] - ax) / cl, ez = (ring[j * 2 + 1] - az) / cl;
         const nx = positive ? ez : -ez, nz = positive ? -ex : ex, D = .0013, hl = Math.min(cl * .22, .0045);
         const mx = ax + ex * cl / 2 + nx * D, mz = az + ez * cl / 2 + nz * D, y0 = base + .0033, y1 = y0 + .00025, canC = [.82, .83, .82];
-        box(c, mx, mz, ex, ez, hl, D, y0, y1, canC, bid, 121, base, iw);
+        box(cd, mx, mz, ex, ez, hl, D, y0, y1, canC, bid, 121, base, iw);
         const C = [[-hl, -D], [hl, -D], [hl, D], [-hl, D]].map(([a, b2]) => [mx + ex * a - ez * b2, y0, mz + ez * a + ex * b2]);
-        quadN(c, C, [0, -1, 0], [0, 0, 1, 0, 1, 1, 0, 1], canC, bid, 117, base, iw); // soffit
+        quadN(cd, C, [0, -1, 0], [0, 0, 1, 0, 1, 1, 0, 1], canC, bid, 117, base, iw); // soffit
         stats.canopies = (stats.canopies || 0) + 1;
       }
     }
@@ -512,11 +514,11 @@ function build({ osm, terrain, ground, options }) {
           const A = [ax + tx * t0, az + tz * t0], B = [ax + tx * t1, az + tz * t1];
           const A2 = [A[0] + nx * D, A[1] + nz * D], B2 = [B[0] + nx * D, B[1] + nz * D];
           const v0 = (y0 - base) * 1000 / floorH, v1 = (y1 - base) * 1000 / floorH, dU = D * 1000 / bay;
-          quadN(c, [[A2[0], y0, A2[1]], [B2[0], y0, B2[1]], [B2[0], y1, B2[1]], [A2[0], y1, A2[1]]], [nx, 0, nz], [0, v0, w, v0, w, v1, 0, v1], wallC, bid, biy, base, iw);
-          quadN(c, [[A[0], y0, A[1]], [A2[0], y0, A2[1]], [A2[0], y1, A2[1]], [A[0], y1, A[1]]], [-tx, 0, -tz], [0, v0, dU, v0, dU, v1, 0, v1], wallC, bid, biy, base, iw);
-          quadN(c, [[B2[0], y0, B2[1]], [B[0], y0, B[1]], [B[0], y1, B[1]], [B2[0], y1, B2[1]]], [tx, 0, tz], [0, v0, dU, v0, dU, v1, 0, v1], wallC, bid, biy, base, iw);
-          quadN(c, [[A[0], y0, A[1]], [B[0], y0, B[1]], [B2[0], y0, B2[1]], [A2[0], y0, A2[1]]], [0, -1, 0], [0, 0, w, 0, w, dU, 0, dU], wallC, bid, biy, base, iw);
-          quadN(c, [[A[0], y1, A[1]], [B[0], y1, B[1]], [B2[0], y1, B2[1]], [A2[0], y1, A2[1]]], [0, 1, 0], [0, 0, w, 0, w, dU, 0, dU], wallC, bid, biy, base, iw);
+          quadN(cd, [[A2[0], y0, A2[1]], [B2[0], y0, B2[1]], [B2[0], y1, B2[1]], [A2[0], y1, A2[1]]], [nx, 0, nz], [0, v0, w, v0, w, v1, 0, v1], wallC, bid, biy, base, iw);
+          quadN(cd, [[A[0], y0, A[1]], [A2[0], y0, A2[1]], [A2[0], y1, A2[1]], [A[0], y1, A[1]]], [-tx, 0, -tz], [0, v0, dU, v0, dU, v1, 0, v1], wallC, bid, biy, base, iw);
+          quadN(cd, [[B2[0], y0, B2[1]], [B[0], y0, B[1]], [B[0], y1, B[1]], [B2[0], y1, B2[1]]], [tx, 0, tz], [0, v0, dU, v0, dU, v1, 0, v1], wallC, bid, biy, base, iw);
+          quadN(cd, [[A[0], y0, A[1]], [B[0], y0, B[1]], [B2[0], y0, B2[1]], [A2[0], y0, A2[1]]], [0, -1, 0], [0, 0, w, 0, w, dU, 0, dU], wallC, bid, biy, base, iw);
+          quadN(cd, [[A[0], y1, A[1]], [B[0], y1, B[1]], [B2[0], y1, B2[1]], [A2[0], y1, A2[1]]], [0, 1, 0], [0, 0, w, 0, w, dU, 0, dU], wallC, bid, biy, base, iw);
           stats.balconies = (stats.balconies || 0) + 1;
         }
       }
@@ -649,16 +651,16 @@ function build({ osm, terrain, ground, options }) {
             if (!inside(px, pz) || !inside(px - .0011, pz + .0006) || !inside(px + .0011, pz + .0006)) continue;
             const y0 = roofY + .0002, y1 = y0 + .0011, zf = pz + .0005, zb = pz - .0004;
             const P = [[px - .001, y0, zf], [px + .001, y0, zf], [px + .001, y1, zb], [px - .001, y1, zb]];
-            quadN(c, P, [0, .77, .64], [0, 0, 2, 0, 2, 1.4, 0, 1.4], wallC, bid, 120, base, iw);
-            quadN(c, [P[1], P[0], P[3], P[2]], [0, -.77, -.64], [0, 0, 2, 0, 2, 1.4, 0, 1.4], wallC, bid, 121, base, iw);
+            quadN(cd, P, [0, .77, .64], [0, 0, 2, 0, 2, 1.4, 0, 1.4], wallC, bid, 120, base, iw);
+            quadN(cd, [P[1], P[0], P[3], P[2]], [0, -.77, -.64], [0, 0, 2, 0, 2, 1.4, 0, 1.4], wallC, bid, 121, base, iw);
             // cylinder: 8 sides along x
-            const tr = .00025, ty = y1 + tr * .8, tz = zb - .0001, SEG = 8, b0 = c.v;
+            const tr = .00025, ty = y1 + tr * .8, tz = zb - .0001, SEG = 8, b0 = cd.v;
             for (let k = 0; k <= SEG; k++) {
               const th = k / SEG * Math.PI * 2, ny = Math.cos(th), nz2 = Math.sin(th);
-              vert(c, px - .0009, ty + ny * tr, tz + nz2 * tr, 0, ny, nz2, 0, k, wallC, bid, 121, ty - base, iw);
-              vert(c, px + .0009, ty + ny * tr, tz + nz2 * tr, 0, ny, nz2, 1.8, k, wallC, bid, 121, ty - base, iw);
+              vert(cd, px - .0009, ty + ny * tr, tz + nz2 * tr, 0, ny, nz2, 0, k, wallC, bid, 121, ty - base, iw);
+              vert(cd, px + .0009, ty + ny * tr, tz + nz2 * tr, 0, ny, nz2, 1.8, k, wallC, bid, 121, ty - base, iw);
             }
-            for (let k = 0; k < SEG; k++) { const a = b0 + k * 2; c.idx.push3(a, a + 2, a + 1); c.idx.push3(a + 1, a + 2, a + 3); }
+            for (let k = 0; k < SEG; k++) { const a = b0 + k * 2; cd.idx.push3(a, a + 2, a + 1); cd.idx.push3(a + 1, a + 2, a + 3); }
             stats.solar = (stats.solar || 0) + 1;
           }
         }
@@ -692,13 +694,13 @@ function build({ osm, terrain, ground, options }) {
             const units = area > 2500 ? 3 : area > 1000 ? 2 : 1;
             for (let u = 0; u < units; u++) {
               const t = (u - (units - 1) / 2) * span * .28, px = cx + ax * t, pz = cz + az * t;
-              if (inside(px, pz)) box(c, px, pz, ax, az, .0015, .001, roofY, roofY + .0016, wallC, bid, 121, base, iw); // HVAC chiller
+              if (inside(px, pz)) box(cd, px, pz, ax, az, .0015, .001, roofY, roofY + .0016, wallC, bid, 121, base, iw); // HVAC chiller
             }
           } else {
             // linear roof monitor / skylight strips along the hall
             for (const off of [-.25, .25]) {
               const px = cx - az * span * off, pz = cz + ax * span * off;
-              if (inside(px, pz)) box(c, px, pz, ax, az, span * .32, .001, roofY, roofY + .0008, wallC, bid, 122, base, iw);
+              if (inside(px, pz)) box(cd, px, pz, ax, az, span * .32, .001, roofY, roofY + .0008, wallC, bid, 122, base, iw);
             }
           }
           stats.hvac = (stats.hvac || 0) + 1;
@@ -707,7 +709,7 @@ function build({ osm, terrain, ground, options }) {
         // brick chimney rising 0.9 m above the middle of a roof slope
         const i = Math.floor(r2 * n) % n, j = (i + 1) % n, mx = (ring[i * 2] + ring[j * 2]) / 2, mz = (ring[i * 2 + 1] + ring[j * 2 + 1]) / 2;
         const px = cx + (mx - cx) * .45, pz = cz + (mz - cz) * .45;
-        if (inside(px, pz)) { box(c, px, pz, ax, az, .000275, .000275, top, top + ridgeH * .55 + .0009, wallC, bid, 123, base, iw); stats.chimneys = (stats.chimneys || 0) + 1; }
+        if (inside(px, pz)) { box(cd, px, pz, ax, az, .000275, .000275, top, top + ridgeH * .55 + .0009, wallC, bid, 123, base, iw); stats.chimneys = (stats.chimneys || 0) + 1; }
       }
     }
     stats.roofs[roofType]++;
@@ -828,9 +830,16 @@ function build({ osm, terrain, ground, options }) {
   progress('buildings', 1);
 
   const chunkOut = [], transfer = [];
+  // one entry per spatial chunk: { key, shell, details }, each a set of 44-byte-stride vertex buffers
+  const empty = { pos: new Buf(Float32Array), nor: new Buf(Int8Array), uv: new Buf(Float32Array), col: new Buf(Uint8Array), info: new Buf(Float32Array), idx: new Buf(Uint32Array) };
+  const bufs = c => {
+    const o = { position: c.pos.out(), normal: c.nor.out(), uv: c.uv.out(), color: c.col.out(), info: c.info.out(), index: c.idx.out() };
+    transfer.push(o.position.buffer, o.normal.buffer, o.uv.buffer, o.color.buffer, o.info.buffer, o.index.buffer); return o;
+  };
   for (const c of chunks.values()) {
-    const o = { key: c.key, position: c.pos.out(), normal: c.nor.out(), uv: c.uv.out(), color: c.col.out(), info: c.info.out(), index: c.idx.out() };
-    chunkOut.push(o); transfer.push(o.position.buffer, o.normal.buffer, o.uv.buffer, o.color.buffer, o.info.buffer, o.index.buffer);
+    if (c.detail) continue;
+    const d = chunks.get(c.key + ':d');
+    chunkOut.push({ key: c.key, shell: bufs(c), details: bufs(d || empty) });
   }
   transfer.push(meta.buffer);
 
