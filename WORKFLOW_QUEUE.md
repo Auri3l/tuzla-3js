@@ -59,7 +59,7 @@
 ## Phase 6: Hero Landmarks & Special Complexes
 *Playbook: [tickets/PHASE6_PLAYBOOK.md](./tickets/PHASE6_PLAYBOOK.md)*
 
-- [ ] **Ticket 6.1** — Tuzla Tersaneler Bölgesi (Shipyards Bay): Giant Goliath gantry cranes, jib cranes, slipways, drydocks, and heavy hull-assembly halls in `src/engine/geometry.worker.js` *(GitHub Issue #17)*
+- [x] **Ticket 6.1** — Tuzla Tersaneler Bölgesi (Shipyards Bay): Giant Goliath gantry cranes, jib cranes, slipways, drydocks, and heavy hull-assembly halls in `src/engine/geometry.worker.js` *(GitHub Issue #17)*
 - [ ] **Ticket 6.2** — Viaport Marina & Coastal Pier: Curved waterfront retail pavilions, marina breakwater lighthouse, floating yacht pontoons, and entertainment wheel/domes in `src/engine/geometry.worker.js` *(GitHub Issue #18)*
 - [ ] **Ticket 6.3** — Intercity İstanbul Park F1 Circuit (Akfırat): Main Grandstand with white tensile membrane roof & steel masts, VIP Pit Lane garages, and Race Control Tower in `src/engine/geometry.worker.js` *(GitHub Issue #19)*
 - [ ] **Ticket 6.4** — University Campuses (Sabancı Univ., İTÜ Denizcilik Fakültesi, Piri Reis Univ., Okan Univ.): Signature campus halls, clock/observation towers, and amphitheatre/dormitory ensembles in `src/engine/geometry.worker.js` *(GitHub Issue #20)*
