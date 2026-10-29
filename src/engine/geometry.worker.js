@@ -830,9 +830,16 @@ function build({ osm, terrain, ground, options }) {
   progress('buildings', 1);
 
   const chunkOut = [], transfer = [];
+  // one entry per spatial chunk: { key, shell, details }, each a set of 44-byte-stride vertex buffers
+  const empty = { pos: new Buf(Float32Array), nor: new Buf(Int8Array), uv: new Buf(Float32Array), col: new Buf(Uint8Array), info: new Buf(Float32Array), idx: new Buf(Uint32Array) };
+  const bufs = c => {
+    const o = { position: c.pos.out(), normal: c.nor.out(), uv: c.uv.out(), color: c.col.out(), info: c.info.out(), index: c.idx.out() };
+    transfer.push(o.position.buffer, o.normal.buffer, o.uv.buffer, o.color.buffer, o.info.buffer, o.index.buffer); return o;
+  };
   for (const c of chunks.values()) {
-    const o = { key: c.key, detail: c.detail, position: c.pos.out(), normal: c.nor.out(), uv: c.uv.out(), color: c.col.out(), info: c.info.out(), index: c.idx.out() };
-    chunkOut.push(o); transfer.push(o.position.buffer, o.normal.buffer, o.uv.buffer, o.color.buffer, o.info.buffer, o.index.buffer);
+    if (c.detail) continue;
+    const d = chunks.get(c.key + ':d');
+    chunkOut.push({ key: c.key, shell: bufs(c), details: bufs(d || empty) });
   }
   transfer.push(meta.buffer);
 

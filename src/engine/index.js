@@ -163,7 +163,8 @@ export async function createTuzla({ canvas, container, places, quality = 'medium
   /* ---- buildings */
   const bMat = buildingMaterial(), bDepth = buildingDepthMaterial(), bPick = buildingPickMaterial();
   const buildings = new THREE.Group(); buildings.name = 'buildings';
-  for (const c of result.chunks) {
+  for (const chunk of result.chunks) for (const c of [chunk.shell, chunk.details]) {
+    if (!c.position.length) continue;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(c.position, 3));
     g.setAttribute('normal', new THREE.BufferAttribute(c.normal, 3, true));
@@ -173,7 +174,7 @@ export async function createTuzla({ canvas, container, places, quality = 'medium
     g.setIndex(new THREE.BufferAttribute(c.index, 1));
     g.computeBoundingBox(); g.boundingBox.max.y += .2; g.computeBoundingSphere(); g.boundingSphere.radius += .15;
     const m = new THREE.Mesh(g, bMat); m.customDepthMaterial = bDepth; m.castShadow = m.receiveShadow = true;
-    m.userData.center = g.boundingSphere.center.clone(); m.userData.radius = g.boundingSphere.radius; m.userData.detail = !!c.detail;
+    m.userData.center = g.boundingSphere.center.clone(); m.userData.radius = g.boundingSphere.radius; m.userData.detail = c === chunk.details;
     buildings.add(m);
   }
   scene.add(buildings);
