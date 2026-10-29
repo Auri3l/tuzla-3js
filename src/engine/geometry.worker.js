@@ -136,6 +136,10 @@ const BAY = [3.1, 2.6, 6, 3.4, 3.0, 3.6, 4.5, 8];
 // Phase 4 mahalle groups and palettes
 const COASTAL_MAH = new Set(['Postane', 'Cami', 'İstasyon', 'Evliya Çelebi', 'Tuzla']);
 const COASTAL_WALLS = ['#efe2c4', '#e8cf9e', '#f3ece0', '#e2b98f', '#ead9bd', '#d9a888', '#f1e6cf', '#dcc29a'].map(hex);
+// northern villa estates: white stucco / warm render above a stone ground floor, low clay or slate roofs
+const VILLA_MAH = new Set(['Tepeören', 'Akfırat', 'Orhanlı', 'Fatih', 'Anadolu', 'Mescit']);
+const VILLA_WALLS = ['#f3efe6', '#efe6d2', '#e9dcc3', '#f6f3ec', '#e4d3b8', '#ead8bd'].map(hex);
+const VILLA_TILES = ['#9c4e38', '#844232', '#5a5652'].map(hex);
 const DENSE_MAH = new Set(['Aydıntepe', 'İçmeler', 'Yayla', 'Şifa', 'Mimar Sinan', 'Orta', 'Aydınlı', 'Evliya Çelebi']);
 // TOKİ / Kiptaş estates: warm sand and dual-tone beige plaster, one colour per estate
 const ESTATE_WALLS = ['#e8d5b0', '#e6c9a8', '#efe0c6', '#dcc0a0', '#e9dccb', '#e3cdb4'].map(hex);
@@ -344,6 +348,7 @@ function build({ osm, terrain, ground, options }) {
     else if (floors <= 2 && area < 200 || kind === 3 && floors <= 3) style = 3;
     else style = (partyLen > perim * .18 && floors >= 3) || r2 < .18 ? 4 : 0;
     // dense mahalles: estates and new residential towers are plastered apartment blocks, not curtain walls
+    const villa = style === 3 && !industrial && (VILLA_MAH.has(mah) || cz < 1.8);
     const site = dense && est < 0 && (kind === 1 || kind === 0 && b[2]) && floors >= 5 && style !== 4 && (floors >= 9 || r3 > .62);
     if ((est >= 0 || site) && style === 1) style = 0;
 
@@ -356,6 +361,7 @@ function build({ osm, terrain, ground, options }) {
     else if (rs === 4) roofType = pitchable && n <= 12 ? 2 : 0;
     else if (rs === 0 && est >= 0) roofType = pitchable && n <= 10 && eh < .55 ? (quad ? 1 : 2) : 0;
     else if (rs === 0 && site) roofType = 0;
+    else if (rs === 0 && villa && pitchable && n <= 10) roofType = quad ? (r3 < .25 ? 3 : 1) : 2;
     else if (rs === 0 && pitchable && style !== 1 && style !== 6 && n <= 10 && area < 1300 && r3 < (style === 3 ? .92 : .78)) roofType = quad ? (style === 3 && r3 < .35 ? 3 : 1) : 2;
     // L-shaped plans (6 orthogonal corners): two overlapping hipped wings (roofType 4 while building, reported as hipped)
     let lWings = null;
@@ -371,6 +377,7 @@ function build({ osm, terrain, ground, options }) {
     else if (est >= 0) { arche = 3; palette = ESTATE_WALLS; pr = eh; }
     else if (site) { arche = 4; palette = SITE_WALLS; }
     else if (dense && style === 4) arche = 2;
+    else if (villa) { arche = 5; palette = VILLA_WALLS; }
     stats.arche = stats.arche || [0, 0, 0, 0, 0, 0, 0, 0]; stats.arche[arche]++;
 
     // colours
@@ -379,7 +386,7 @@ function build({ osm, terrain, ground, options }) {
     let roofC = tagColour(b[4]);
     if (!roofC) {
       const s = sat(cx, cz);
-      if (roofType) roofC = pick(TILES, est >= 0 ? eh * 3.7 % 1 : r3);
+      if (roofType) roofC = arche === 5 ? pick(VILLA_TILES, r3) : pick(TILES, est >= 0 ? eh * 3.7 % 1 : r3);
       else if (industrial) roofC = s ? mix(pick(METAL, r3), s, area > 2500 ? .75 : .45) : pick(METAL, r3);
       else roofC = s ? mix(pick(FLAT, r3), s, .3) : pick(FLAT, r3);
     }
@@ -460,7 +467,7 @@ function build({ osm, terrain, ground, options }) {
     // >= 100 tells the shader this is a roof: 110 flat, 111 hipped, 112 pyramid, 113 metal, 114 dome, 115 minaret,
     // 116 gabled, 117 eave soffit / fascia, 118 parapet coping
     const roofStyle = roofType === 3 ? 116 : 110 + roofType;
-    const EAVE = .0004, FASCIA = .00012;
+    const EAVE = arche === 5 ? .00055 : .0004, FASCIA = .00012, PITCH = arche === 5 ? .75 : 1; // villas: generous saçak, low slope
     const T = (q, y = top, rel = hKm) => [q[0], y, q[1], rel];
     const eaveOf = (a, b2) => { const ex = b2[0] - a[0], ez = b2[1] - a[1], l = Math.hypot(ex, ez) || 1; return [a[0], a[1], ex / l, ez / l]; };
     /** Sloped underside from the wall top P to the eave rim E (dropped by `drop`), plus a thin fascia on the rim. */
@@ -485,7 +492,7 @@ function build({ osm, terrain, ground, options }) {
       let qx = 0, qz = 0; for (const q of Q) { qx += q[0] / 4; qz += q[1] / 4; }
       const ux = ((Q[1][0] - Q[0][0]) + (Q[2][0] - Q[3][0])) / 2, uz = ((Q[1][1] - Q[0][1]) + (Q[2][1] - Q[3][1])) / 2, ul = Math.hypot(ux, uz);
       const dxu = ux / ul, dzu = uz / ul, half = gable ? L / 2 : Math.max(0, (L - Wd) / 2);
-      const rh = Math.min(gable ? 4.2 : 3.6, Math.max(1.3, Wd * 1000 * (gable ? .32 : .26))) / 1000;
+      const rh = Math.min(gable ? 4.2 : 3.6, Math.max(1.3, Wd * 1000 * (gable ? .32 : .26) * PITCH)) / 1000;
       const ry = top + rh, rrel = hKm + rh, drop = EAVE * rh / (Wd / 2); ridgeH = Math.max(ridgeH, rh);
       // gabled ridge ends sit exactly over the short-edge midpoints so the gable walls stay vertical; the roof runs on past them
       const R1 = gable ? [(Q[3][0] + Q[0][0]) / 2, ry, (Q[3][1] + Q[0][1]) / 2, rrel] : [qx - dxu * half, ry, qz - dzu * half, rrel];
@@ -523,7 +530,7 @@ function build({ osm, terrain, ground, options }) {
       built = hipQuad([0, 1, 2, 3].map(k => [ring[k * 2], ring[k * 2 + 1]]), roofType === 3, roofStyle);
       if (built) stats.pitched++;
     } else if (roofType === 2) {
-      const rh = Math.min(3.4, Math.max(1.2, Math.sqrt(area) * .22)) / 1000; ridgeH = rh;
+      const rh = Math.min(3.4, Math.max(1.2, Math.sqrt(area) * .22 * PITCH)) / 1000; ridgeH = rh;
       const apex = [cx, top + rh, cz, hKm + rh];
       const P = []; for (let i = 0; i < n; i++) P.push([ring[i * 2], ring[i * 2 + 1]]);
       const E = offsetPoly(P, EAVE), drop = EAVE * rh / (Math.sqrt(area) / 2000);

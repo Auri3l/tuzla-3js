@@ -316,6 +316,29 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
         }
       }
     }
+    // northern villas (Phase 4.3): stone ground floor, stucco or timber upper floor, garden sliding doors
+    if (arche > 4.5 && arche < 5.5 && wallRole < 2.5 && vFacade.y > 0.0) {
+      bool plaster = msk.r > .5 && msk.g < .1;
+      if (fl < .5 && wallRole > .5 && h < .7 && cell.y < .8) {
+        // full-height sliding patio door facing the yard, slim anthracite frame and a centre meeting rail
+        float fr = max(step(abs(cell.x - .5), .012), step(.37, abs(cell.x - .5))) + step(.75, cell.y) + step(cell.y, .04);
+        if (abs(cell.x - .5) < .4) { tex = mix(vec3(.3, .38, .42), vec3(.2, .21, .22), clamp(fr, 0.0, 1.0)); msk = vec3(0.0, fr > .5 ? 0.0 : 1.0, fr > .5 ? .72 : .3); plaster = false; }
+      }
+      if (plaster && fl < .5) {
+        // split-face natural stone cladding in irregular courses
+        vec2 pm = vec2(vFacade.x * 3.4, vFacade.y * 3.05);
+        float course = floor(pm.y / .22), jx = fract(pm.x / (.32 + .2 * tzHash(vec2(course, id))) + tzHash(vec2(id, course))), jy = fract(pm.y / .22);
+        float fwm = max(fwidth(pm.x), fwidth(pm.y)) * 1.5, fade = clamp(1.0 - fwm * 5.0, 0.0, 1.0);
+        float joint = max(1.0 - smoothstep(.0, .05 + fwm * 4.0, min(jx, 1.0 - jx)), 1.0 - smoothstep(.0, .06 + fwm * 4.0, min(jy, 1.0 - jy)));
+        vec3 stone = mix(vec3(.64, .55, .43), vec3(.5, .44, .37), tzHash(vec2(floor(pm.x / .3), course) + id)) * (.9 + .15 * fract(seed * 11.0));
+        tex = mix(stone, stone * .55, joint * fade); msk = vec3(0.0, 0.0, mix(.6, .3, joint * fade));
+      } else if (plaster && seed > .62 && vFacade.y < floors + .02) {
+        // horizontal larch boarding on the upper floor
+        float bd = fract(vFacade.y * 3.05 / .14), fwb = fwidth(vFacade.y * 3.05 / .14);
+        vec3 wood = vec3(.55, .38, .24) * (.9 + .12 * tzHash(vec2(floor(vFacade.y * 3.05 / .14), floor(vFacade.x * 2.0)) + id));
+        tex = mix(wood, wood * .6, (1.0 - smoothstep(.0, .12 + fwb, bd)) * clamp(1.0 - fwb * 2.0, 0.0, 1.0)); msk = vec3(0.0, 0.0, .5 + .15 * step(.5, bd));
+      }
+    }
     // shop awnings take a per-shop colour; coastal awnings are striped canvas
     vec3 awn = mix(vec3(.62,.2,.16), mix(vec3(.16,.32,.5), vec3(.75,.58,.2), step(.5, fract(h * 7.0))), step(.4, h));
     if (coastal) awn = mix(awn, vec3(.93, .9, .82), step(.5, fract(cell.x * 7.0)));
