@@ -2,7 +2,7 @@
 // road ribbons, street lamps, traffic paths, rail chains and tree placement.
 // Everything is returned as typed arrays (transferred, not copied).
 import earcut from 'earcut';
-import { terrainSampler, hash2 } from './geo.js';
+import { terrainSampler, hash2, toWorld } from './geo.js';
 
 const post = (msg, transfer) => self.postMessage(msg, transfer || []);
 const progress = (stage, value) => post({ type: 'progress', stage, value });
@@ -85,6 +85,16 @@ function tagColour(t) {
   if (/^#[0-9a-f]{3}$/.test(t)) return hex('#' + t[1] + t[1] + t[2] + t[2] + t[3] + t[3]);
   return NAMED[t] ? hex(NAMED[t]) : null;
 }
+const BRICK_WALLS = ['#b5654a', '#a85d45', '#c07a5c', '#d9c4a8', '#9e5a48', '#cdb79a', '#b98a6c'].map(hex);
+const PUBLIC_WALLS = ['#e6d9bf', '#d8b48f', '#c98e6e', '#e9e2d2', '#d3c3a3', '#cfa98a'].map(hex);
+const RETAIL_WALLS = ['#e4e6e4', '#d5d9da', '#eeeae2', '#c9d0d3', '#dfe1dc'].map(hex);
+const HANGAR_WALLS = ['#8fa3b0', '#a7b4b8', '#7f97a6', '#b9bfbc', '#9aa8a2', '#c2c4bd'].map(hex);
+// per style: wall palette and window-bay width (m)
+const STYLE_WALLS = [WALLS, GLASS_WALLS, INDUSTRIAL_WALLS, HOUSE_WALLS, BRICK_WALLS, PUBLIC_WALLS, RETAIL_WALLS, HANGAR_WALLS];
+const BAY = [3.1, 2.6, 6, 3.4, 3.0, 3.6, 4.5, 8];
+// Tersaneler (shipyard bay): 40.822..40.840 N, 29.275..29.298 E
+const [SYX0, SYZ1] = toWorld(40.822, 29.275), [SYX1, SYZ0] = toWorld(40.840, 29.298);
+const inShipyard = (x, z) => x > SYX0 && x < SYX1 && z > SYZ0 && z < SYZ1;
 const pick = (arr, r) => arr[Math.floor(r * arr.length) % arr.length];
 const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 
@@ -146,20 +156,23 @@ function build({ osm, terrain, ground, options }) {
   const BG = .1, bgrid = new Map();
   const tmpN = [0, 0, 0];
 
-  function vert(c, x, y, z, nx, ny, nz, u, v, colr, bid, style, rel, seed) {
+  // info = [bid, iy, rel, iw]; iy packs style + wallRole * 16 for walls or
+  // 100 + roofStyle for roofs, iw packs floors (integer part) + seed (fraction).
+  function vert(c, x, y, z, nx, ny, nz, u, v, colr, bid, iy, rel, iw) {
     c.pos.push3(x, y, z);
     c.nor.push3(Math.round(nx * 127), Math.round(ny * 127), Math.round(nz * 127));
     c.uv.push2(u, v);
     c.col.push3(colr[0] * 255 | 0, colr[1] * 255 | 0, colr[2] * 255 | 0);
-    c.info.push4(bid, style, rel, seed);
+    c.info.push4(bid, iy, rel, iw);
     return c.v++;
   }
+  const packW = (floors, seed) => Math.floor(floors) + Math.min(.9999, Math.max(.0001, seed));
   function faceNormal(ax, ay, az, bx, by, bz, cx, cy, cz) {
     const ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz) || 1;
     tmpN[0] = nx / l; tmpN[1] = ny / l; tmpN[2] = nz / l; return tmpN;
   }
-  /** Triangle with automatic up-facing winding; uv per vertex in metres. */
+  /** Triangle with automatic up-facing winding; uv per vertex in metres. `style` is the packed info.y. */
   function roofTri(c, p, colr, bid, style, seed, eave) {
     // p: [x,y,z,rel] * 3 ; eave: [ex, ez, dx, dz] eave line point and unit direction
     let n = faceNormal(p[0], p[1], p[2], p[4], p[5], p[6], p[8], p[9], p[10]);
@@ -176,11 +189,16 @@ function build({ osm, terrain, ground, options }) {
   }
 
   const total = osm.buildings.length;
-  const stats = { pitched: 0, flat: 0, named: 0 };
+  const stats = { pitched: 0, flat: 0, named: 0, walls: [0, 0, 0, 0], styles: [0, 0, 0, 0, 0, 0, 0, 0], roofs: [0, 0, 0, 0] };
+
+  /* ------------------------------------------------ urban topology rasters */
+  const tTopo = performance.now();
+  const { isNearRoad, rings, holesOf, partyWall } = urbanTopology(osm.roads, osm.buildings, terrain.bounds);
+  stats.topologyMs = Math.round(performance.now() - tTopo);
   for (let bid = 0; bid < total; bid++) {
     if (bid % 2000 === 0) progress('buildings', bid / total);
     const b = osm.buildings[bid];
-    const ring = cleanRing(b[0]);
+    const ring = rings[bid], holes = holesOf[bid];
     if (ring.length < 6) continue;
     let sa = signedArea(ring);
     const area = Math.abs(sa) * 1e6;
@@ -206,15 +224,56 @@ function build({ osm, terrain, ground, options }) {
       else floors = 4 + Math.round(r1 * 4);
       heightM = floors * floorH + (industrial ? 0 : .6);
     }
-    let style = industrial ? 2 : (floors >= 9 || (b[3] === 0 && area > 1400 && r2 > .4)) ? 1 : (floors <= 2 && area < 200) ? 3 : 0;
+    // wall topology: 0 street front, 1 side, 2 rear/courtyard, 3 blind party wall
+    const positive = sa >= 0, roles = new Uint8Array(n);
+    let fx = 0, fz = 0, longest = -1, longestLen = 0, partyLen = 0;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n, ax = ring[i * 2], az = ring[i * 2 + 1], bx = ring[j * 2], bz = ring[j * 2 + 1];
+      const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz);
+      if (len < 2e-4) { roles[i] = 3; continue; }
+      const nx = (positive ? dz : -dz) / len, nz = (positive ? -dx : dx) / len;
+      if (len < .0028) { roles[i] = 3; continue; }
+      if (partyWall(bid, ax, az, bx, bz, nx, nz, len)) { roles[i] = 3; partyLen += len; continue; }
+      if (isNearRoad((ax + bx) / 2 + nx * .008, (az + bz) / 2 + nz * .008)) { roles[i] = 0; fx += nx * len; fz += nz * len; }
+      else { roles[i] = 1; if (len > longestLen) { longestLen = len; longest = i; } }
+    }
+    if (fx === 0 && fz === 0 && longest >= 0) {
+      roles[longest] = 0;
+      const j = (longest + 1) % n, dx = ring[j * 2] - ring[longest * 2], dz = ring[j * 2 + 1] - ring[longest * 2 + 1];
+      fx = positive ? dz : -dz; fz = positive ? -dx : dx;
+    }
+    {
+      const fl = Math.hypot(fx, fz) || 1; fx /= fl; fz /= fl;
+      for (let i = 0; i < n; i++) if (roles[i] === 1) {
+        const j = (i + 1) % n, dx = ring[j * 2] - ring[i * 2], dz = ring[j * 2 + 1] - ring[i * 2 + 1], len = Math.hypot(dx, dz);
+        if (((positive ? dz : -dz) * fx + (positive ? -dx : dx) * fz) / len < -.5) roles[i] = 2;
+      }
+    }
 
-    // roof type: 0 flat, 1 hipped (rectangles), 2 pyramid
-    const convex = isConvex(ring);
+    // visual style 0..7: 0 apartment, 1 glass/office tower, 2 factory/OSB hall, 3 house/villa,
+    // 4 bitişik nizam 1990s apartment, 5 public/civic, 6 retail/mall, 7 shipyard hangar/logistics
+    const kind = b[3], perim = ring.reduce((s2, _, k) => k % 2 ? s2 : s2 + Math.hypot(ring[(k + 2) % ring.length] - ring[k], ring[(k + 3) % ring.length] - ring[k + 1]), 0);
+    let style;
+    if (industrial) style = inShipyard(cx, cz) || (kind === 2 && area > 9000) ? 7 : kind === 4 && area < 2500 ? 6 : 2;
+    else if (kind === 4) style = floors >= 7 ? 1 : (floors <= 2 || area > 1500) ? 6 : partyLen > perim * .18 ? 4 : 0;
+    else if (kind === 0 || kind === 5 || kind === 7) style = floors >= 9 ? 1 : 5;
+    else if (kind === 6) style = area < 200 ? 3 : 2;
+    else if (floors >= 9) style = 1;
+    else if (floors <= 2 && area < 200 || kind === 3 && floors <= 3) style = 3;
+    else style = (partyLen > perim * .18 && floors >= 3) || r2 < .18 ? 4 : 0;
+
+    // roof type: 0 flat, 1 hipped, 2 pyramidal, 3 gabled; explicit roofShape (b[6]) wins over heuristics
+    const convex = isConvex(ring), quad = n === 4 && convex, pitchable = !holes && !industrial && convex;
+    const rs = b[6] || 0;
     let roofType = 0;
-    if (!industrial && style !== 1 && convex && n <= 10 && area < 1300 && r3 < (style === 3 ? .92 : .78)) roofType = n === 4 ? 1 : 2;
+    if (rs === 2) roofType = !pitchable ? 0 : quad ? 1 : n <= 10 ? 2 : 0;
+    else if (rs === 3) roofType = !pitchable ? 0 : quad ? 3 : n <= 10 ? 2 : 0;
+    else if (rs === 4) roofType = pitchable && n <= 12 ? 2 : 0;
+    else if (rs === 0 && pitchable && style !== 1 && style !== 6 && n <= 10 && area < 1300 && r3 < (style === 3 ? .92 : .78)) roofType = quad ? (style === 3 && r3 < .35 ? 3 : 1) : 2;
 
     // colours
-    let wallC = tagColour(b[5]) || (style === 2 ? pick(INDUSTRIAL_WALLS, r2) : style === 1 ? pick(GLASS_WALLS, r2) : style === 3 ? pick(HOUSE_WALLS, r2) : pick(WALLS, r2));
+    stats.styles[style]++;
+    let wallC = tagColour(b[5]) || pick(STYLE_WALLS[style], r2);
     let roofC = tagColour(b[4]);
     if (!roofC) {
       const s = sat(cx, cz);
@@ -227,34 +286,45 @@ function build({ osm, terrain, ground, options }) {
     let gMin = Infinity, gMax = -Infinity;
     const gy = new Float32Array(n);
     for (let i = 0; i < n; i++) { const g = elev(ring[i * 2], ring[i * 2 + 1]); gy[i] = g; if (g < gMin) gMin = g; if (g > gMax) gMax = g; }
-    const hKm = heightM / 1000, base = gMin + (gMax - gMin) * .5, top = base + hKm;
-    const sink = .0015;
+    // level plinth (subasman): the ground floor starts 0.3 m above the highest corner and a
+    // stone/concrete plinth absorbs the slope down to 1.2 m below each corner
+    const hKm = heightM / 1000, base = gMax + .0003, top = base + hKm;
+    const minKm = Math.min(b[7] || 0, heightM - 1) / 1000, floating = minKm > 0;
     const seed = r1;
     const c = getChunk(cx, cz);
-    const positive = sa >= 0;
 
     // walls (each edge spans a whole number of window bays)
-    const bay = style === 2 ? 6 : style === 1 ? 2.6 : style === 3 ? 3.4 : 3.1;
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n, ax = ring[i * 2], az = ring[i * 2 + 1], bx = ring[j * 2], bz = ring[j * 2 + 1];
-      const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz); if (len < 2e-4) continue;
-      const nx = (positive ? dz : -dz) / len, nz = (positive ? -dx : dx) / len;
-      const bays = Math.max(1, Math.round(len * 1000 / bay));
-      const ya = gy[i] - sink, yb = gy[j] - sink;
-      const va = (ya - base) * 1000 / floorH, vb = (yb - base) * 1000 / floorH, vt = hKm * 1000 / floorH;
-      const i0 = vert(c, ax, ya, az, nx, 0, nz, 0, va, wallC, bid, style, 0, seed);
-      const i1 = vert(c, bx, yb, bz, nx, 0, nz, bays, vb, wallC, bid, style, 0, seed);
-      const i2 = vert(c, bx, top, bz, nx, 0, nz, bays, vt, wallC, bid, style, hKm, seed);
-      const i3 = vert(c, ax, top, az, nx, 0, nz, 0, vt, wallC, bid, style, hKm, seed);
-      // outward winding: (A,C,B)(A,D,C) when the right-hand perpendicular is outward
-      if (-dz * nx + dx * nz > 0) c.idx.push3(i0, i1, i2), c.idx.push3(i0, i2, i3);
-      else c.idx.push3(i0, i2, i1), c.idx.push3(i0, i3, i2);
-    }
+    const bay = BAY[style];
+    const iw = packW(floors, seed);
+    const walls = (r, outward, role) => {
+      const m = r.length / 2;
+      for (let i = 0; i < m; i++) {
+        const j = (i + 1) % m, ax = r[i * 2], az = r[i * 2 + 1], bx = r[j * 2], bz = r[j * 2 + 1];
+        const dx = bx - ax, dz = bz - az, len = Math.hypot(dx, dz); if (len < 2e-4) continue;
+        const nx = (outward ? dz : -dz) / len, nz = (outward ? -dx : dx) / len;
+        const wr = role === undefined ? roles[i] : role, iy = style + wr * 16; stats.walls[wr]++;
+        const bays = Math.max(1, Math.round(len * 1000 / bay));
+        const ga = role === undefined ? gy[i] : elev(ax, az), gb = role === undefined ? gy[j] : elev(bx, bz);
+        const ya = floating ? base + minKm : ga - .0012, yb = floating ? base + minKm : gb - .0012;
+        const va = floating ? 0 : (ya - base) * 1000 / floorH, vb = floating ? 0 : (yb - base) * 1000 / floorH, vt = (top - (floating ? ya : base)) * 1000 / floorH;
+        const i0 = vert(c, ax, ya, az, nx, 0, nz, 0, va, wallC, bid, iy, floating ? minKm : 0, iw);
+        const i1 = vert(c, bx, yb, bz, nx, 0, nz, bays, vb, wallC, bid, iy, floating ? minKm : 0, iw);
+        const i2 = vert(c, bx, top, bz, nx, 0, nz, bays, vt, wallC, bid, iy, hKm, iw);
+        const i3 = vert(c, ax, top, az, nx, 0, nz, 0, vt, wallC, bid, iy, hKm, iw);
+        // outward winding: (A,C,B)(A,D,C) when the right-hand perpendicular is outward
+        if (-dz * nx + dx * nz > 0) c.idx.push3(i0, i1, i2), c.idx.push3(i0, i2, i3);
+        else c.idx.push3(i0, i2, i1), c.idx.push3(i0, i3, i2);
+      }
+    };
+    walls(ring, positive);
+    // courtyard walls face into the hole, i.e. against the hole ring's own outward side
+    if (holes) for (const h of holes) walls(h, signedArea(h) < 0, 2);
 
     // roof
-    const roofStyle = 10 + roofType; // > 9 tells the shader this is a roof
+    // >= 100 tells the shader this is a roof: 110 flat, 111 hipped, 112 pyramid, 113 metal, 114 dome, 115 minaret, 116 gabled
+    const roofStyle = roofType === 3 ? 116 : 110 + roofType;
     let built = false;
-    if (roofType === 1) {
+    if (roofType === 1 || roofType === 3) {
       // hipped roof over a quadrilateral: ridge along the longer axis
       const P = [0, 1, 2, 3].map(k => [ring[k * 2], ring[k * 2 + 1]]);
       const e0 = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]), e1 = Math.hypot(P[2][0] - P[1][0], P[2][1] - P[1][1]);
@@ -262,17 +332,34 @@ function build({ osm, terrain, ground, options }) {
       const L = Math.max(e0, e1), Wd = Math.min(e0, e1);
       if (Wd > 0.003) {
         const ux = ((Q[1][0] - Q[0][0]) + (Q[2][0] - Q[3][0])) / 2, uz = ((Q[1][1] - Q[0][1]) + (Q[2][1] - Q[3][1])) / 2, ul = Math.hypot(ux, uz);
-        const dxu = ux / ul, dzu = uz / ul, half = Math.max(0, (L - Wd) / 2);
-        const rh = Math.min(3.6, Math.max(1.3, Wd * 1000 * .26)) / 1000;
+        const gable = roofType === 3, dxu = ux / ul, dzu = uz / ul, half = gable ? L / 2 : Math.max(0, (L - Wd) / 2);
+        const rh = Math.min(gable ? 4.2 : 3.6, Math.max(1.3, Wd * 1000 * (gable ? .32 : .26))) / 1000;
         const ry = top + rh, rrel = hKm + rh;
-        const R1 = [cx - dxu * half, ry, cz - dzu * half, rrel], R2 = [cx + dxu * half, ry, cz + dzu * half, rrel];
+        // gabled ridge ends sit exactly on the midpoints of the short edges so the gable walls stay vertical
+        const R1 = gable ? [(Q[3][0] + Q[0][0]) / 2, ry, (Q[3][1] + Q[0][1]) / 2, rrel] : [cx - dxu * half, ry, cz - dzu * half, rrel];
+        const R2 = gable ? [(Q[1][0] + Q[2][0]) / 2, ry, (Q[1][1] + Q[2][1]) / 2, rrel] : [cx + dxu * half, ry, cz + dzu * half, rrel];
         const T = q => [q[0], top, q[1], hKm];
         const eaveOf = (a, b) => { const ex = b[0] - a[0], ez = b[1] - a[1], l = Math.hypot(ex, ez) || 1; return [a[0], a[1], ex / l, ez / l]; };
-        const quad = (a, bq, r2, r1) => { const ev = eaveOf(a, bq); roofTri(c, [...T(a), ...T(bq), ...r2], roofC, bid, roofStyle, seed, ev); roofTri(c, [...T(a), ...r2, ...r1], roofC, bid, roofStyle, seed, ev); };
+        const quad = (a, bq, r2, r1) => { const ev = eaveOf(a, bq); roofTri(c, [...T(a), ...T(bq), ...r2], roofC, bid, roofStyle, iw, ev); roofTri(c, [...T(a), ...r2, ...r1], roofC, bid, roofStyle, iw, ev); };
         quad(Q[0], Q[1], R2, R1);
         quad(Q[2], Q[3], R1, R2);
-        roofTri(c, [...T(Q[1]), ...T(Q[2]), ...R2], roofC, bid, roofStyle, seed, eaveOf(Q[1], Q[2]));
-        roofTri(c, [...T(Q[3]), ...T(Q[0]), ...R1], roofC, bid, roofStyle, seed, eaveOf(Q[3], Q[0]));
+        if (gable) {
+          // vertical triangular gable end walls in the wall colour (plain plaster)
+          const gableWall = (a, bq, r) => {
+            const ex = bq[0] - a[0], ez = bq[1] - a[1], l = Math.hypot(ex, ez) || 1;
+            let nx = ez / l, nz = -ex / l;
+            if (((a[0] + bq[0]) / 2 - cx) * nx + ((a[1] + bq[1]) / 2 - cz) * nz < 0) { nx = -nx; nz = -nz; }
+            const iy = style + 48, vt = hKm * 1000 / floorH, bays = Math.max(1, Math.round(l * 1000 / bay));
+            const i0 = vert(c, a[0], top, a[1], nx, 0, nz, 0, vt, wallC, bid, iy, hKm, iw);
+            const i1 = vert(c, bq[0], top, bq[1], nx, 0, nz, bays, vt, wallC, bid, iy, hKm, iw);
+            const i2 = vert(c, r[0], r[1], r[2], nx, 0, nz, bays / 2, vt + rh * 1000 / floorH, wallC, bid, iy, r[3], iw);
+            if (-ez * nx + ex * nz > 0) c.idx.push3(i0, i1, i2); else c.idx.push3(i0, i2, i1);
+          };
+          gableWall(Q[1], Q[2], R2); gableWall(Q[3], Q[0], R1);
+        } else {
+          roofTri(c, [...T(Q[1]), ...T(Q[2]), ...R2], roofC, bid, roofStyle, iw, eaveOf(Q[1], Q[2]));
+          roofTri(c, [...T(Q[3]), ...T(Q[0]), ...R1], roofC, bid, roofStyle, iw, eaveOf(Q[3], Q[0]));
+        }
         built = true; stats.pitched++;
       }
     } else if (roofType === 2) {
@@ -281,20 +368,23 @@ function build({ osm, terrain, ground, options }) {
       for (let i = 0; i < n; i++) {
         const j = (i + 1) % n, a = [ring[i * 2], ring[i * 2 + 1]], bq = [ring[j * 2], ring[j * 2 + 1]];
         const ex = bq[0] - a[0], ez = bq[1] - a[1], l = Math.hypot(ex, ez); if (l < 1e-5) continue;
-        roofTri(c, [a[0], top, a[1], hKm, bq[0], top, bq[1], hKm, ...apex], roofC, bid, roofStyle, seed, [a[0], a[1], ex / l, ez / l]);
+        roofTri(c, [a[0], top, a[1], hKm, bq[0], top, bq[1], hKm, ...apex], roofC, bid, roofStyle, iw, [a[0], a[1], ex / l, ez / l]);
       }
       built = true; stats.pitched++;
     }
     if (!built) {
       roofType = 0;
-      const tri = earcut(ring);
+      let flat = ring, holeIdx;
+      if (holes) { flat = ring.slice(); holeIdx = []; for (const h of holes) { holeIdx.push(flat.length / 2); for (let k = 0; k < h.length; k++) flat.push(h[k]); } }
+      const tri = earcut(flat, holeIdx);
       for (let t = 0; t < tri.length; t += 3) {
         const a = tri[t] * 2, bq = tri[t + 1] * 2, cc = tri[t + 2] * 2;
-        roofTri(c, [ring[a], top, ring[a + 1], hKm, ring[bq], top, ring[bq + 1], hKm, ring[cc], top, ring[cc + 1], hKm], roofC, bid, industrial ? 13 : 10, seed, null);
+        roofTri(c, [flat[a], top, flat[a + 1], hKm, flat[bq], top, flat[bq + 1], hKm, flat[cc], top, flat[cc + 1], hKm], roofC, bid, industrial ? 113 : 110, iw, null);
       }
       stats.flat++;
     }
 
+    stats.roofs[roofType]++;
     // occupancy for tree placement
     fillRing(ring, occ, OW, OH, bx0, bz0, OC, 1);
 
@@ -303,7 +393,6 @@ function build({ osm, terrain, ground, options }) {
     meta[m + 6] = gMin; meta[m + 7] = style; meta[m + 8] = roofType; meta[m + 9] = b[3]; meta[m + 10] = industrial ? 1 : 0; meta[m + 11] = top;
     const gk = Math.floor(cx / BG) + ',' + Math.floor(cz / BG);
     (bgrid.get(gk) || bgrid.set(gk, []).get(gk)).push(bid);
-    osm.buildings[bid] = ring; // keep the cleaned ring for naming
   }
 
   // attach names of named building POIs
@@ -312,14 +401,14 @@ function build({ osm, terrain, ground, options }) {
     const i0 = Math.floor(p.wx / BG), j0 = Math.floor(p.wz / BG);
     search: for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
       const list = bgrid.get((i0 + di) + ',' + (j0 + dj)); if (!list) continue;
-      for (const id of list) if (Array.isArray(osm.buildings[id]) && pointInRing(p.wx, p.wz, osm.buildings[id])) { names[id] = p[0]; stats.named++; break search; }
+      for (const id of list) if (meta[id * 12 + 2] > 0 && pointInRing(p.wx, p.wz, rings[id])) { names[id] = p[0]; stats.named++; break search; }
     }
   }
   // mosques: a lead dome and a minaret, the most recognisable silhouette of an İstanbul street
   const LEAD = [.56, .6, .63], STONE = [.92, .9, .85];
   for (const id in names) {
     if (!names[id].toLocaleLowerCase('tr').includes('cami')) continue;
-    const m = id * 12, cx = meta[m], cz = meta[m + 1], area = meta[m + 5], top = meta[m + 11], hKm = meta[m + 2] / 1000, ring = osm.buildings[id];
+    const m = id * 12, cx = meta[m], cz = meta[m + 1], area = meta[m + 5], top = meta[m + 11], hKm = meta[m + 2] / 1000, ring = rings[id];
     const c = getChunk(cx, cz), bid = +id;
     const rd = Math.min(14, Math.max(3.5, Math.sqrt(area) * .3)) / 1000;
     const SEG = 14, RINGS = 6;
@@ -328,7 +417,7 @@ function build({ osm, terrain, ground, options }) {
       const ph = r / RINGS * Math.PI / 2, y = Math.sin(ph), rr = Math.cos(ph);
       for (let s = 0; s <= SEG; s++) {
         const th = s / SEG * Math.PI * 2, nx = Math.cos(th) * rr, nz = Math.sin(th) * rr;
-        vert(c, cx + nx * rd, top + y * rd, cz + nz * rd, nx, y, nz, s, r, LEAD, bid, 14, hKm + y * rd, .5);
+        vert(c, cx + nx * rd, top + y * rd, cz + nz * rd, nx, y, nz, s, r, LEAD, bid, 114, hKm + y * rd, .5);
       }
     }
     for (let r = 0; r < RINGS; r++) for (let s = 0; s < SEG; s++) {
@@ -343,8 +432,8 @@ function build({ osm, terrain, ground, options }) {
       for (let s = 0; s <= SIDES; s++) {
         const th = s / SIDES * Math.PI * 2, nx = Math.cos(th), nz = Math.sin(th), slope = (r0 - r1) / (y1 - y0 || 1) * .001;
         const nl = Math.hypot(1, slope);
-        vert(c, mx + nx * r0, y0, mz + nz * r0, nx / nl, slope / nl, nz / nl, s, 0, STONE, bid, 15, rel0, .5);
-        vert(c, mx + nx * r1, y1, mz + nz * r1, nx / nl, slope / nl, nz / nl, s, 1, STONE, bid, 15, rel1, .5);
+        vert(c, mx + nx * r0, y0, mz + nz * r0, nx / nl, slope / nl, nz / nl, s, 0, STONE, bid, 115, rel0, .5);
+        vert(c, mx + nx * r1, y1, mz + nz * r1, nx / nl, slope / nl, nz / nl, s, 1, STONE, bid, 115, rel1, .5);
       }
       for (let s = 0; s < SIDES; s++) { const a = b0 + s * 2; c.idx.push3(a, a + 2, a + 1); c.idx.push3(a + 1, a + 2, a + 3); }
     };
@@ -528,6 +617,89 @@ function build({ osm, terrain, ground, options }) {
     type: 'done', chunks: chunkOut, meta, names, stats: { ...stats, trees: treeOut.length / 6, lamps: lampOut.length / 3, proceduralTrees: placed },
     roads: roadOut, lamps: lampOut, paths: pathOut, rails: railOut, trees: treeOut, chunkSize: CH
   }, transfer);
+}
+
+/* ------------------------------------------------ urban topology rasters */
+// Kept out of build() so V8 optimises these hot loops on their own.
+function urbanTopology(roads, buildings, [bx0, bz0, bx1, bz1]) {
+  const total = buildings.length;
+  // road frontage raster: 6 m cells stamped within 18 m of driveable and pedestrian centrelines (12 m stride)
+  const RC = .006, RW = Math.ceil((bx1 - bx0) / RC), RH = Math.ceil((bz1 - bz0) / RC);
+  const roadR = new Uint8Array(RW * RH), SPAN = [0, 2, 3, 3, 3, 2, 0];
+  for (const [k, a] of roads) {
+    if (k > 4 || a.length < 4) continue;
+    for (let i = 0; i + 3 < a.length; i += 2) {
+      const ax = a[i], az = a[i + 1], dx = a[i + 2] - ax, dz = a[i + 3] - az, s = Math.max(1, Math.ceil(Math.hypot(dx, dz) / (RC * 2)));
+      for (let q = 0; q <= s; q++) {
+        const gi = Math.floor((ax + dx * q / s - bx0) / RC), gj = Math.floor((az + dz * q / s - bz0) / RC);
+        for (let dj = -3; dj <= 3; dj++) {
+          const jj = gj + dj; if (jj < 0 || jj >= RH) continue;
+          const w = SPAN[dj + 3], row = jj * RW;
+          for (let ii = Math.max(0, gi - w), i1 = Math.min(RW - 1, gi + w); ii <= i1; ii++) roadR[row + ii] = 1;
+        }
+      }
+    }
+  }
+  const isNearRoad = (x, z) => { const i = Math.floor((x - bx0) / RC), j = Math.floor((z - bz0) / RC); return i >= 0 && j >= 0 && i < RW && j < RH && roadR[j * RW + i] === 1; };
+
+  // cleaned outer rings and courtyard holes for every building
+  const rings = new Array(total), holesOf = new Array(total);
+  for (let bid = 0; bid < total; bid++) {
+    const b = buildings[bid];
+    rings[bid] = cleanRing(b[0]);
+    const hs = Array.isArray(b[8]) ? b[8].map(cleanRing).filter(r => r.length >= 6) : null;
+    holesOf[bid] = hs && hs.length ? hs : null;
+  }
+  // party-wall spatial hash: building edges longer than 2.5 m, sampled every metre into 2 m cells.
+  // (cell, edge) pairs are bucketed by a counting pass into a CSR list indexed by an open-addressing table.
+  const EC = .002, EW = Math.ceil((bx1 - bx0) / EC) + 1;
+  const edges = new Buf(Float32Array, 1 << 18), eOwn = new Buf(Int32Array, 1 << 16), pk = new Buf(Int32Array, 1 << 19), pe = new Buf(Int32Array, 1 << 19);
+  const ekey = (x, z) => Math.floor((z - bz0) / EC) * EW + Math.floor((x - bx0) / EC);
+  for (let bid = 0; bid < total; bid++) {
+    const r = rings[bid], n = r.length / 2; if (n < 3) continue;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n, ax = r[i * 2], az = r[i * 2 + 1], bx = r[j * 2], bz = r[j * 2 + 1], len = Math.hypot(bx - ax, bz - az);
+      if (len < .0025) continue;
+      const e = eOwn.n; eOwn.push1(bid); edges.push4(ax, az, bx, bz);
+      const s = Math.ceil(len / .001); let last = -1;
+      for (let q = 0; q <= s; q++) {
+        const key = ekey(ax + (bx - ax) * q / s, az + (bz - az) * q / s);
+        if (key !== last) { last = key; pk.push1(key); pe.push1(e); }
+      }
+    }
+  }
+  let HS = 1; while (HS < pk.n * 1.5) HS <<= 1;
+  const hKey = new Int32Array(HS).fill(-1), hStart = new Int32Array(HS), hEnd = new Int32Array(HS), pSlot = new Int32Array(pk.n);
+  const slotOf = key => { let slot = Math.imul(key, 0x9E3779B1) >>> 0 & (HS - 1); for (;;) { const kk = hKey[slot]; if (kk === key || kk === -1) return slot; slot = (slot + 1) & (HS - 1); } };
+  for (let k = 0; k < pk.n; k++) { const slot = slotOf(pk.a[k]); hKey[slot] = pk.a[k]; hEnd[slot]++; pSlot[k] = slot; }
+  for (let slot = 0, acc = 0; slot < HS; slot++) { hStart[slot] = acc; acc += hEnd[slot]; hEnd[slot] = hStart[slot]; }
+  const cellEdges = new Int32Array(pk.n);
+  for (let k = 0; k < pk.n; k++) cellEdges[hEnd[pSlot[k]]++] = pe.a[k];
+  const cellSlot = key => { const slot = slotOf(key); return hKey[slot] === key ? slot : -1; };
+  const EA = edges.a, EO = eOwn.a;
+  /** True when another building's edge runs parallel within 1.4 m in front of this wall (bitişik nizam). */
+  function partyWall(bid, ax, az, bx, bz, nx, nz, len) {
+    const ux = (bx - ax) / len, uz = (bz - az) / len; let hits = 0;
+    for (let t = 0; t < 3; t++) {
+      const f = .2 + .3 * t, px = ax + (bx - ax) * f, pz = az + (bz - az) * f;
+      let hit = false, prev = -1;
+      for (let s = 0; s < 3 && !hit; s++) {
+        const key = ekey(px + nx * .0007 * s, pz + nz * .0007 * s); if (key === prev) continue; prev = key;
+        const slot = cellSlot(key); if (slot < 0) continue;
+        for (let k = hStart[slot], k1 = hEnd[slot]; k < k1; k++) {
+          const e = cellEdges[k]; if (EO[e] === bid) continue;
+          const o = e * 4, ex = EA[o + 2] - EA[o], ez = EA[o + 3] - EA[o + 1], el = Math.hypot(ex, ez);
+          if (Math.abs((ex * ux + ez * uz) / el) < .85) continue;
+          let tt = ((px - EA[o]) * ex + (pz - EA[o + 1]) * ez) / (el * el); tt = tt < 0 ? 0 : tt > 1 ? 1 : tt;
+          const qx = EA[o] + ex * tt - px, qz = EA[o + 1] + ez * tt - pz;
+          if (qx * qx + qz * qz < .0014 * .0014 && qx * nx + qz * nz > -.0004) { hit = true; break; }
+        }
+      }
+      if (hit && ++hits >= 2) return true;
+    }
+    return false;
+  }
+  return { isNearRoad, rings, holesOf, partyWall };
 }
 
 function rev(a) { const o = []; for (let i = a.length - 2; i >= 0; i -= 2) o.push(a[i], a[i + 1]); return o; }

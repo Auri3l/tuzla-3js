@@ -20,11 +20,13 @@ float tzFbm(vec2 p){ float v = 0.0, a = .5; for(int i = 0; i < 4; i++){ v += a *
 `;
 
 /* --------------------------------------------------------------- facades */
-// A 4×2 atlas: columns are styles (apartment, glass, industrial, house),
+// An 8×2 atlas: columns are the eight visual styles (apartment, glass tower,
+// factory, house, bitişik nizam apartment, public block, retail, hangar);
 // the bottom row is the ground floor and the top row an upper floor.
+export const ATLAS_STYLES = 8;
 function facadeAtlas() {
   const S = 256, col = document.createElement('canvas'), msk = document.createElement('canvas');
-  col.width = msk.width = S * 4; col.height = msk.height = S * 2;
+  col.width = msk.width = S * ATLAS_STYLES; col.height = msk.height = S * 2;
   const g = col.getContext('2d'), m = msk.getContext('2d');
   const WALL = '#ffffff', TINT = 'rgb(255,0,0)', GLASS = 'rgb(0,255,255)', NONE = 'rgb(0,0,0)';
   g.fillStyle = WALL; g.fillRect(0, 0, col.width, col.height);
@@ -38,7 +40,7 @@ function facadeAtlas() {
     g.fillStyle = grd; g.fillRect(cx + x * S, cy + y * S, w * S, h * S);
   };
   const noise = (cx, cy, alpha) => { for (let i = 0; i < 900; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * alpha})`; g.fillRect(cx + Math.random() * S, cy + Math.random() * S, 2, 2); } };
-  for (let s = 0; s < 4; s++) for (let row = 0; row < 2; row++) {
+  for (let s = 0; s < ATLAS_STYLES; s++) for (let row = 0; row < 2; row++) {
     const cx = s * S, cy = row * S, ground = row === 1;
     noise(cx, cy, .05);
     if (s === 0) { // apartment: window with frame, sill and a balcony band
@@ -67,6 +69,55 @@ function facadeAtlas() {
       for (let i = 0; i < 32; i++) both(cx, cy, i / 32, 0, .012, 1, 'rgba(0,0,0,.14)', 'rgb(200,0,0)');
       if (!ground) { glass(cx, cy, .04, .1, .92, .14, '#53656b'); both(cx, cy, 0, .3, 1, .015, 'rgba(0,0,0,.2)', TINT); }
       else { both(cx, cy, .12, .22, .76, .78, '#8f9596', NONE); for (let i = 0; i < 18; i++) both(cx, cy, .12, .24 + i * .042, .76, .008, '#6f7576', NONE); }
+    } else if (s === 4) { // 1990s bitişik nizam apartment: mosaic tile cladding, recessed cam balkon
+      for (let y = 0; y < 1; y += 1 / 24) for (let x = 0; x < 1; x += 1 / 24) {
+        const k = Math.random(); rect(g, `rgba(${k < .5 ? '120,60,40' : '255,250,240'},${.05 + k * .07})`, cx + x * S, cy + y * S, S / 24 - 1, S / 24 - 1);
+      }
+      if (!ground) {
+        rect(g, 'rgba(0,0,0,.08)', cx, cy + .9 * S, S, .1 * S);
+        both(cx, cy, .06, .1, .88, .64, '#5a5d5c', NONE);            // recess shadow
+        glass(cx, cy, .08, .12, .84, .44, '#4a6068');                 // folding glass panes
+        for (let i = 0; i <= 6; i++) both(cx, cy, .08 + i * .84 / 6 - .006, .12, .012, .44, '#d6d8d4', NONE);
+        both(cx, cy, .06, .56, .88, .2, '#e8e2d6', TINT);             // parapet band
+        both(cx, cy, .06, .76, .88, .025, '#bdb8ad', NONE);           // slab edge
+      } else {
+        both(cx, cy, .04, .12, .92, .82, '#2b2f31', NONE);
+        glass(cx, cy, .07, .3, .86, .62, '#4b636c');
+        both(cx, cy, .04, .12, .92, .16, '#9a4a3c', NONE);            // awning band (recoloured)
+        both(cx, cy, .36, .3, .03, .64, '#2b2f31', NONE); both(cx, cy, .66, .3, .03, .64, '#2b2f31', NONE);
+      }
+    } else if (s === 5) { // public / school block: wide multi-mullion windows in a brick frame
+      if (!ground) {
+        rect(g, 'rgba(0,0,0,.05)', cx, cy + .88 * S, S, .12 * S);
+        both(cx, cy, .08, .16, .84, .58, '#b0674c', NONE);            // brick surround
+        glass(cx, cy, .11, .19, .78, .52, '#3f5862');
+        for (let i = 1; i < 4; i++) both(cx, cy, .11 + i * .78 / 4 - .006, .19, .012, .52, '#eeece6', NONE);
+        both(cx, cy, .11, .36, .78, .012, '#eeece6', NONE);           // transom
+        both(cx, cy, .06, .74, .88, .05, '#d9d3c4', NONE);            // sill band
+      } else {
+        both(cx, cy, .06, .14, .88, .1, '#d9d3c4', NONE);             // entrance canopy edge
+        both(cx, cy, .1, .26, .8, .74, '#3a4245', NONE);
+        glass(cx, cy, .13, .29, .74, .71, '#4a636c');
+        for (let i = 1; i < 4; i++) both(cx, cy, .13 + i * .74 / 4 - .007, .29, .014, .71, '#c9cbc8', NONE);
+      }
+    } else if (s === 6) { // retail: composite aluminium panels, strip window, glass vitrine
+      for (let i = 0; i <= 4; i++) both(cx, cy, 0, i / 4, 1, .008, 'rgba(0,0,0,.18)', 'rgb(160,0,0)');
+      for (let i = 0; i <= 2; i++) both(cx, cy, i / 2, 0, .008, 1, 'rgba(0,0,0,.18)', 'rgb(160,0,0)');
+      if (!ground) { glass(cx, cy, 0, .34, 1, .2, '#4d6670'); both(cx, cy, 0, .34, 1, .012, '#9aa3a6', NONE); }
+      else {
+        both(cx, cy, 0, .06, 1, .2, '#9a4a3c', NONE);                 // fascia sign band (recoloured)
+        glass(cx, cy, .02, .28, .96, .72, '#5a7680');
+        both(cx, cy, .49, .28, .02, .72, '#8e979a', NONE);
+      }
+    } else if (s === 7) { // shipyard hangar / logistics: tall steel siding, sliding bay door
+      for (let i = 0; i < 24; i++) both(cx, cy, i / 24, 0, .016, 1, 'rgba(0,0,0,.16)', 'rgb(190,0,0)');
+      for (let i = 0; i < 40; i++) rect(g, `rgba(110,70,40,${Math.random() * .08})`, cx + Math.random() * S, cy + Math.random() * S, 3, 10 + Math.random() * 30); // rust streaks
+      if (!ground) { glass(cx, cy, 0, .08, 1, .1, '#56676c'); both(cx, cy, 0, .2, 1, .012, 'rgba(0,0,0,.25)', TINT); }
+      else {
+        both(cx, cy, .08, .12, .84, .88, '#7c8586', NONE);
+        for (let i = 0; i < 14; i++) both(cx, cy, .08 + i * .06, .12, .006, .88, '#646c6d', NONE);
+        for (let i = 0; i < 12; i++) both(cx, cy, .08 + i * .07, .9, .035, .1, i % 2 ? '#1d1d1b' : '#e2b62a', NONE); // safety stripes
+      }
     } else { // small house: shuttered window or a door
       if (!ground) {
         both(cx, cy, .3, .22, .4, .48, '#f2f0ea', NONE); glass(cx, cy, .33, .25, .34, .42, '#3b4d55');
@@ -113,30 +164,57 @@ ${NOISE}`)
       .replace('#include <color_fragment>', /* glsl */`
 float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0;
 {
-  float style = vInfo.y, id = vInfo.x, seed = vInfo.w;
+  // info.y: style + wallRole * 16 on walls, 100 + roof style on roofs; info.w: floors + seed
+  float id = vInfo.x, floors = floor(vInfo.w), seed = fract(vInfo.w);
+  float style = mod(vInfo.y, 16.0), wallRole = floor(vInfo.y / 16.0), rStyle = vInfo.y - 100.0;
   vec3 tint = pow(vColor, vec3(2.2)); // vertex colours are stored as sRGB bytes
   vec3 albedo;
-  if (style < 9.5) {
+  if (vInfo.y < 99.5) {
     float fl = floor(vFacade.y), bay = floor(vFacade.x);
     vec2 cell = fract(vFacade);
     float h = tzHash3(vec3(bay, fl, id));
     float row = 1.0;
-    if (fl < 0.5) {
-      // ground floor: shops on apartments and glass towers, occasional doors elsewhere
-      if (style < 0.5 || (style > 0.5 && style < 1.5)) row = 0.0;
-      else if (h < (style > 2.5 ? .35 : .22)) row = 0.0;
+    bool shop = style < 1.5 || (style > 3.5 && style < 4.5) || (style > 5.5 && style < 6.5);
+    if (fl < 0.5 && wallRole < 1.5) {
+      // ground floor: shops and vitrines only on the street front, doors / bay doors elsewhere
+      if (wallRole < 0.5 && shop) row = 0.0;
+      else if (h < (style > 2.5 && !shop ? .35 : .22) * (wallRole < 0.5 ? 1.0 : .5)) row = 0.0;
     }
-    vec2 auv = vec2((style + cell.x) * .25, (row == 0.0 ? 0.0 : .5) + cell.y * .5);
-    vec2 dx = dFdx(vFacade) * vec2(.25, .5), dy = dFdy(vFacade) * vec2(.25, .5);
+    // rear and courtyard walls: narrower utility / kitchen windows
+    float cx = wallRole > 1.5 ? clamp(.5 + (cell.x - .5) * 1.6, 0.0, 1.0) : cell.x;
+    vec2 auv = vec2((style + cx) * .125, (row == 0.0 ? 0.0 : .5) + cell.y * .5);
+    vec2 dx = dFdx(vFacade) * vec2(.125, .5), dy = dFdy(vFacade) * vec2(.125, .5);
     vec3 tex = textureGrad(uFacade, auv, dx, dy).rgb;
     vec3 msk = textureGrad(uMask, auv, dx, dy).rgb;
+    if (wallRole > 2.5) {
+      // blind party wall (sağır cephe): plain plaster with floor-slab lines, no openings
+      float sfw = fwidth(vFacade.y), slab = 1.0 - smoothstep(.025, .025 + sfw * 1.5, abs(fract(vFacade.y + .5) - .5));
+      tex = vec3(.9) * (1.0 - .08 * slab * clamp(1.0 - sfw * 2.0, 0.0, 1.0));
+      msk = vec3(1.0, 0.0, 0.0);
+    }
     // shop awnings take a per-shop colour
     vec3 awn = mix(vec3(.62,.2,.16), mix(vec3(.16,.32,.5), vec3(.75,.58,.2), step(.5, fract(h * 7.0))), step(.4, h));
-    if (row == 0.0 && style < 0.5 && cell.y > .72 && cell.y < .88 && cell.x > .04 && cell.x < .96) tex = mix(tex, awn, .85);
+    bool awning = style < 0.5 || (style > 3.5 && style < 4.5);
+    if (row == 0.0 && wallRole < 0.5 && awning && cell.y > .72 && cell.y < .88 && cell.x > .04 && cell.x < .96) tex = mix(tex, awn, .85);
+    if (row == 0.0 && wallRole < 0.5 && style > 5.5 && style < 6.5 && cell.y > .74 && cell.y < .94) tex = mix(tex, awn * 1.2, .8); // retail fascia
     albedo = mix(tex, tex * tint, msk.r);
-    // plinth below the ground floor, soft contact shadow near the ground
-    if (vFacade.y < 0.0) albedo = tint * .62;
-    float ao = mix(.62, 1.0, smoothstep(-.4, 1.1, vFacade.y));
+    float ao = mix(.72, 1.0, smoothstep(-.2, 1.1, vFacade.y));
+    if (vFacade.y < 0.0) {
+      // subasman: level travertine / concrete block plinth absorbing the slope
+      vec2 pm = vec2(vFacade.x * 3.1, vFacade.y * 3.05);                  // metres
+      float course = floor(pm.y / .45), jx = fract(pm.x / .9 + .5 * mod(course, 2.0)), jy = fract(pm.y / .45);
+      float fwm = max(fwidth(pm.y), fwidth(pm.x)) * 1.2;
+      float joint = max(1.0 - smoothstep(.0, .02 + fwm, min(jx, 1.0 - jx) * .9), 1.0 - smoothstep(.0, .02 + fwm, min(jy, 1.0 - jy) * .45));
+      vec3 stone = mix(vec3(.74, .69, .6), tint * .78, step(.5, fract(seed * 7.3)));   // travertine or tinted concrete
+      stone *= .9 + .16 * tzHash(vec2(floor(pm.x / .9 + .5 * mod(course, 2.0)), course) + id);
+      albedo = mix(stone, stone * .55, joint * clamp(1.0 - fwm * 4.0, 0.0, 1.0));
+      // drip-edge ledge: a 15 cm lit lip right under the ground floor with a shadow line beneath
+      float ly = -vFacade.y * 3.05;
+      albedo = mix(albedo, vec3(.86, .84, .8), 1.0 - smoothstep(.13, .15 + fwm, ly));
+      albedo *= mix(1.0, .6, smoothstep(.15, .17 + fwm, ly) * (1.0 - smoothstep(.17, .32, ly)));
+      // ground contact: the plinth reaches 1.2 m below the terrain at its lowest corner
+      ao *= mix(.6, 1.0, smoothstep(1.2, 2.1, vInfo.z * 1000.0));
+    }
     albedo *= ao;
     // subtle weathering
     albedo *= .93 + .1 * tzNoise(vec2(vFacade.x * 1.7 + id, vFacade.y * .8));
@@ -150,10 +228,10 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0;
     albedo = mix(albedo, albedo * .45, tzGlass * uNight);
   } else {
     // roofs
-    vec2 p = vFacade;
+    vec2 p = vFacade; style = rStyle;
     if (style > 13.5 && style < 14.5) { albedo = tint * (.8 + .2 * vFacade.y / 6.0); tzRough = .45; }       // dome
-    else if (style > 14.5) { albedo = tint * (.9 + .1 * step(.5, fract(vFacade.y * 6.0))); tzRough = .7; } // minaret
-    else if (style > 10.5 && style < 12.5) {
+    else if (style > 14.5 && style < 15.5) { albedo = tint * (.9 + .1 * step(.5, fract(vFacade.y * 6.0))); tzRough = .7; } // minaret
+    else if ((style > 10.5 && style < 12.5) || style > 15.5) {
       // clay tiles: rows along the slope with staggered joints
       float rowi = floor(p.y / .34);
       float rr = fract(p.y / .34), cc = fract(p.x / .26 + .5 * mod(rowi, 2.0));
