@@ -33,7 +33,7 @@
 *Playbook: [tickets/PHASE3_PLAYBOOK.md](./tickets/PHASE3_PLAYBOOK.md)*
 
 - [x] **Ticket 3.1** — 3D Protruding Balconies, Recessed *Gömme* Balconies & Tinted *Cam Balkon* Enclosures on Street/Side Residential Facades (`wallRole <= 1`) in `src/engine/geometry.worker.js` & `src/engine/materials.js` *(GitHub Issue #8)*
-- [ ] **Ticket 3.2** — Outward-Offset Roof Eaves (*Saçak* `0.45m` Overhang with Under-Soffit Shading), Flat-Roof Perimeter Parapet Walls (`0.60m` Coping) & L/U-Wing Roof Decomposition in `src/engine/geometry.worker.js` *(GitHub Issue #9)*
+- [x] **Ticket 3.2** — Outward-Offset Roof Eaves (*Saçak* `0.45m` Overhang with Under-Soffit Shading), Flat-Roof Perimeter Parapet Walls (`0.60m` Coping) & L/U-Wing Roof Decomposition in `src/engine/geometry.worker.js` *(GitHub Issue #9)*
 - [ ] **Ticket 3.3** — 3D Rooftop Micro-Architecture (Elevator Machine Penthouses, Brick Chimneys, Turkish Solar Water-Heater Frames + Cylindrical Tanks, and Industrial HVAC/Skylights) in `src/engine/geometry.worker.js` & `src/engine/materials.js` *(GitHub Issue #10)*
 
 ---

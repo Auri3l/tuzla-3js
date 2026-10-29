@@ -260,6 +260,9 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
         float fr = clamp(step(.93, fract(vFacade.x * 3.0)) + step(.95, cy), 0.0, 1.0);          // folding cam balkon panes
         tex = mix(vec3(.3, .4, .45), vec3(.86), fr); msk = vec3(0.0, 1.0 - fr, fr > .5 ? .72 : .3);
       } else { tex = vec3(.2, .19, .18); msk = vec3(0.0, 0.0, .3); }                              // shaded open recess
+    } else if (vFacade.y > floors + .02 && wallRole < 3.5) {
+      // attic band and parapet above the last floor: plain plaster with a coping line at the very top
+      tex = vec3(.94); msk = vec3(1.0, 0.0, .5);
     } else if (wallRole > 2.5) {
       // blind party wall (sağır cephe): plain plaster with floor-slab lines, no openings
       float sfw = fwidth(vFacade.y), slab = 1.0 - smoothstep(.025, .025 + sfw * 1.5, abs(fract(vFacade.y + .5) - .5));
@@ -351,9 +354,11 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
   } else {
     // roofs
     vec2 p = vFacade; style = rStyle;
-    if (style > 13.5 && style < 14.5) { albedo = tint * (.8 + .2 * vFacade.y / 6.0); tzRough = .45; }       // dome
+    if (style > 16.5 && style < 17.5) { albedo = tint * .62 * (.9 + .1 * tzNoise(p * 2.0)); tzRough = .9; }          // eave soffit / fascia, in shade
+    else if (style > 17.5 && style < 18.5) { albedo = mix(tint, vec3(.8, .79, .76), .6) * (.88 + .14 * tzNoise(p * 3.0 + id)); tzRough = .92; } // parapet coping
+    else if (style > 13.5 && style < 14.5) { albedo = tint * (.8 + .2 * vFacade.y / 6.0); tzRough = .45; }       // dome
     else if (style > 14.5 && style < 15.5) { albedo = tint * (.9 + .1 * step(.5, fract(vFacade.y * 6.0))); tzRough = .7; } // minaret
-    else if ((style > 10.5 && style < 12.5) || style > 15.5) {
+    else if ((style > 10.5 && style < 12.5) || (style > 15.5 && style < 16.5)) {
       // clay tiles: rows along the slope with staggered joints
       float rowi = floor(p.y / .34);
       float rr = fract(p.y / .34), cc = fract(p.x / .26 + .5 * mod(rowi, 2.0));
