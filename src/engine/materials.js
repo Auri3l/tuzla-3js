@@ -221,7 +221,9 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
 {
   // info.y: style + wallRole * 16 on walls, 100 + roof style on roofs; info.w: floors + seed
   // round first: interpolated varyings can land a hair below the packed integer
-  float iy = floor(vInfo.y + .5), id = floor(vInfo.x + .5), floors = floor(vInfo.w), seed = fract(vInfo.w);
+  // info.w = floors + (archetype + seed) / 8
+  float iy = floor(vInfo.y + .5), id = floor(vInfo.x + .5), floors = floor(vInfo.w), aw = fract(vInfo.w) * 8.0;
+  float arche = floor(aw), seed = fract(aw);
   float style = mod(iy, 16.0), wallRole = floor(iy / 16.0), rStyle = iy - 100.0;
   vec3 tint = pow(vColor, vec3(2.2)); // vertex colours are stored as sRGB bytes
   vec3 albedo;
@@ -230,7 +232,10 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
     vec2 cell = fract(vFacade);
     float h = tzHash3(vec3(bay, fl, id));
     float row = 1.0;
-    bool shop = style < 1.5 || (style > 3.5 && style < 4.5) || (style > 5.5 && style < 6.5);
+    bool coastal = arche > .5 && arche < 1.5;
+    bool shop = style < 1.5 || (style > 3.5 && style < 4.5) || (style > 5.5 && style < 6.5) || coastal;
+    // coastal high streets: houses get the apartment shopfront column on the street front
+    float aStyle = coastal && style > 2.5 && style < 3.5 && fl < .5 && wallRole < .5 ? 0.0 : style;
     if (fl < 0.5 && wallRole < 1.5) {
       // ground floor: shops and vitrines only on the street front, doors / bay doors elsewhere
       if (wallRole < 0.5 && shop) row = 0.0;
@@ -240,7 +245,7 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
     float squeeze = wallRole > 1.5 && wallRole < 2.5 ? 1.6 : 1.0, cx = .5 + (cell.x - .5) * squeeze;
     bool margin = cx < .015 || cx > .985;
     cx = clamp(cx, .015, .985);
-    vec2 auv = vec2((style + cx) * .125, (row == 0.0 ? 0.0 : .5) + cell.y * .5);
+    vec2 auv = vec2((aStyle + cx) * .125, (row == 0.0 ? 0.0 : .5) + cell.y * .5);
     vec2 dx = dFdx(vFacade) * vec2(.125 * squeeze, .5), dy = dFdy(vFacade) * vec2(.125 * squeeze, .5);
     vec3 tex = textureGrad(uFacade, auv, dx, dy).rgb;
     vec3 msk = textureGrad(uMask, auv, dx, dy).rgb;
@@ -269,9 +274,18 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
       tex = vec3(.9) * (1.0 - .08 * slab * clamp(1.0 - sfw * 2.0, 0.0, 1.0));
       msk = vec3(1.0, 0.0, 0.0);
     }
-    // shop awnings take a per-shop colour
+    // coastal apartments: painted timber shutters beside the upper windows
+    if (coastal && row > .5 && style < .5 && wallRole < 1.5 && vFacade.y > 1.0 && vFacade.y < floors + .02) {
+      float sh = step(.1, cx) * step(cx, .19) + step(.81, cx) * step(cx, .9);
+      if (sh > .5 && cell.y > .28 && cell.y < .84) {
+        vec3 shc = fract(seed * 5.7) < .4 ? vec3(.3, .42, .3) : fract(seed * 5.7) < .7 ? vec3(.24, .4, .44) : vec3(.42, .3, .22);
+        tex = shc * (.85 + .15 * step(.5, fract(cell.y * 14.0))); msk = vec3(0.0, 0.0, .7);
+      }
+    }
+    // shop awnings take a per-shop colour; coastal awnings are striped canvas
     vec3 awn = mix(vec3(.62,.2,.16), mix(vec3(.16,.32,.5), vec3(.75,.58,.2), step(.5, fract(h * 7.0))), step(.4, h));
-    bool awning = style < 0.5 || (style > 3.5 && style < 4.5);
+    if (coastal) awn = mix(awn, vec3(.93, .9, .82), step(.5, fract(cell.x * 7.0)));
+    bool awning = aStyle < 0.5 || (style > 3.5 && style < 4.5);
     if (row == 0.0 && wallRole < 0.5 && awning && cell.y > .72 && cell.y < .88 && cell.x > .04 && cell.x < .96) tex = mix(tex, awn, .85);
     if (row == 0.0 && wallRole < 0.5 && style > 5.5 && style < 6.5 && cell.y > .74 && cell.y < .94) tex = mix(tex, awn * 1.2, .8); // retail fascia
     albedo = mix(tex, tex * tint, msk.r);

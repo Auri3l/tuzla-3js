@@ -133,6 +133,9 @@ const HANGAR_WALLS = ['#8fa3b0', '#a7b4b8', '#7f97a6', '#b9bfbc', '#9aa8a2', '#c
 // per style: wall palette and window-bay width (m)
 const STYLE_WALLS = [WALLS, GLASS_WALLS, INDUSTRIAL_WALLS, HOUSE_WALLS, BRICK_WALLS, PUBLIC_WALLS, RETAIL_WALLS, HANGAR_WALLS];
 const BAY = [3.1, 2.6, 6, 3.4, 3.0, 3.6, 4.5, 8];
+// Phase 4 mahalle groups and palettes
+const COASTAL_MAH = new Set(['Postane', 'Cami', 'İstasyon', 'Evliya Çelebi', 'Tuzla']);
+const COASTAL_WALLS = ['#efe2c4', '#e8cf9e', '#f3ece0', '#e2b98f', '#ead9bd', '#d9a888', '#f1e6cf', '#dcc29a'].map(hex);
 // Tersaneler (shipyard bay): 40.822..40.840 N, 29.275..29.298 E
 const [SYX0, SYZ1] = toWorld(40.822, 29.275), [SYX1, SYZ0] = toWorld(40.840, 29.298);
 const inShipyard = (x, z) => x > SYX0 && x < SYX1 && z > SYZ0 && z < SYZ1;
@@ -207,7 +210,13 @@ function build({ osm, terrain, ground, options }) {
     c.info.push4(bid, iy, rel, iw);
     return c.v++;
   }
-  const packW = (floors, seed) => Math.floor(floors) + Math.min(.9999, Math.max(.0001, seed));
+  // info.w = floors + (archetype + seed) / 8: archetype 0 generic, 1 coastal/historic, 2 dense 1980s-90s,
+  // 3 TOKİ/Kiptaş estate, 4 yeni nesil site, 5 suburban villa, 6 OSB industrial
+  const packW = (floors, seed, arche = 0) => Math.floor(floors) + (arche + Math.min(.998, Math.max(.002, seed))) / 8;
+
+  // mahalle of a point: the nearest suburb/town label
+  const SUBURBS = osm.pois.filter(p => (p[3] === 'suburb' || p[3] === 'town') && p.wx !== undefined).map(p => [p[0], p.wx, p.wz]);
+  const mahalleOf = (x, z) => { let best = '', bd = Infinity; for (const [nm, sx, sz] of SUBURBS) { const d = (sx - x) ** 2 + (sz - z) ** 2; if (d < bd) { bd = d; best = nm; } } return best; };
   function faceNormal(ax, ay, az, bx, by, bz, cx, cy, cz) {
     const ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz) || 1;
@@ -340,9 +349,15 @@ function build({ osm, terrain, ground, options }) {
     }
     const PARAPET = .00055, parapet = roofType === 0 && !industrial && !holes && area >= 55 && style !== 2 && style !== 7;
 
+    // mahalle archetypes (Phase 4)
+    const mah = mahalleOf(cx, cz);
+    let arche = 0, palette = STYLE_WALLS[style];
+    if (COASTAL_MAH.has(mah) && cz > 5.8 && (style === 0 || style === 3 || style === 4 || style === 6)) { arche = 1; palette = COASTAL_WALLS; }
+    stats.arche = stats.arche || [0, 0, 0, 0, 0, 0, 0, 0]; stats.arche[arche]++;
+
     // colours
     stats.styles[style]++;
-    let wallC = tagColour(b[5]) || pick(STYLE_WALLS[style], r2);
+    let wallC = tagColour(b[5]) || pick(palette, r2);
     let roofC = tagColour(b[4]);
     if (!roofC) {
       const s = sat(cx, cz);
@@ -364,7 +379,7 @@ function build({ osm, terrain, ground, options }) {
 
     // walls (each edge spans a whole number of window bays)
     const bay = BAY[style];
-    const iw = packW(floors, seed);
+    const iw = packW(floors, seed, arche);
     const topW = top + (parapet ? PARAPET : 0); // flat terraces get a parapet rising above the roof
     const walls = (r, outward, role) => {
       const m = r.length / 2;
