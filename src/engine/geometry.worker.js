@@ -189,6 +189,27 @@ function build({ osm, terrain, ground, options }) {
     }
   }
 
+  /** Planar quad P[0..3] (each [x,y,z]) facing along n, with uv per corner. rel = height above `base`. */
+  function quadN(c, P, n, UV, colr, bid, iy, base, iw) {
+    const ids = P.map((p, k) => vert(c, p[0], p[1], p[2], n[0], n[1], n[2], UV[k * 2], UV[k * 2 + 1], colr, bid, iy, Math.max(0, p[1] - base), iw));
+    const f = faceNormal(P[0][0], P[0][1], P[0][2], P[1][0], P[1][1], P[1][2], P[2][0], P[2][1], P[2][2]);
+    if (f[0] * n[0] + f[1] * n[1] + f[2] * n[2] >= 0) c.idx.push3(ids[0], ids[1], ids[2]), c.idx.push3(ids[0], ids[2], ids[3]);
+    else c.idx.push3(ids[0], ids[2], ids[1]), c.idx.push3(ids[0], ids[3], ids[2]);
+  }
+  /** Box on an axis (ux, uz): half length hl along u, half depth hd across, from y0 to y1; top and four sides. */
+  function box(c, x, z, ux, uz, hl, hd, y0, y1, colr, bid, iy, base, iw, uvScale = 1000, sides = 15) {
+    const vx = -uz, vz = ux, k = uvScale;
+    const C = [[-hl, -hd], [hl, -hd], [hl, hd], [-hl, hd]].map(([a, b]) => [x + ux * a + vx * b, z + uz * a + vz * b]);
+    const H = (y1 - y0) * k;
+    const N = [[-vx, 0, -vz], [ux, 0, uz], [vx, 0, vz], [-ux, 0, -uz]];
+    for (let s2 = 0; s2 < 4; s2++) {
+      if (!(sides >> s2 & 1)) continue;
+      const a = C[s2], b2 = C[(s2 + 1) % 4], L = Math.hypot(b2[0] - a[0], b2[1] - a[1]) * k;
+      quadN(c, [[a[0], y0, a[1]], [b2[0], y0, b2[1]], [b2[0], y1, b2[1]], [a[0], y1, a[1]]], N[s2], [0, 0, L, 0, L, H, 0, H], colr, bid, iy, base, iw);
+    }
+    quadN(c, C.map(p => [p[0], y1, p[1]]), [0, 1, 0], [0, 0, hl * 2 * k, 0, hl * 2 * k, hd * 2 * k, 0, hd * 2 * k], colr, bid, iy, base, iw);
+  }
+
   const total = osm.buildings.length;
   const stats = { pitched: 0, flat: 0, named: 0, walls: [0, 0, 0, 0], styles: [0, 0, 0, 0, 0, 0, 0, 0], roofs: [0, 0, 0, 0] };
 
@@ -320,6 +341,39 @@ function build({ osm, terrain, ground, options }) {
     walls(ring, positive);
     // courtyard walls face into the hole, i.e. against the hole ring's own outward side
     if (holes) for (const h of holes) walls(h, signedArea(h) < 0, 2);
+
+    // 3D balcony stacks (wallRole 4 in info.y) on street fronts and long side walls of apartments:
+    // one box per stack from the first floor slab to just under the roof, never on blind party walls
+    if ((style === 0 || style === 4) && floors >= 2 && area >= 75 && !floating) {
+      const D = .0011, y0 = base + floorH / 1000 - .00015, y1 = top - .0004, glazed = style === 4 || r3 > .7;
+      const biy = (glazed ? 4 : 0) + 64;
+      // the two longest street fronts and the longest long side wall carry balconies
+      const cand = [];
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n, len = Math.hypot(ring[j * 2] - ring[i * 2], ring[j * 2 + 1] - ring[i * 2 + 1]);
+        if ((roles[i] === 0 && len >= .006) || (roles[i] === 1 && len >= .009)) cand.push([roles[i], len, i]);
+      }
+      cand.sort((a, b2) => a[0] - b2[0] || b2[1] - a[1]);
+      const pickE = cand.filter(e => e[0] === 0).slice(0, 2).concat(cand.filter(e => e[0] === 1).slice(0, 1));
+      for (const [, , i] of pickE) {
+        const j = (i + 1) % n, ax = ring[i * 2], az = ring[i * 2 + 1], ex = ring[j * 2] - ax, ez = ring[j * 2 + 1] - az, len = Math.hypot(ex, ez);
+        const bays = Math.max(1, Math.round(len * 1000 / bay)); if (bays < 2) continue;
+        const nx = (positive ? ez : -ez) / len, nz = (positive ? -ex : ex) / len, tx = ex / len, tz = ez / len;
+        const w = bays >= 6 ? 1.6 : 1.2, starts = bays >= 5 ? [bays * .25 - w / 2, bays * .75 - w / 2] : [(bays - w) / 2];
+        for (const u0 of starts) {
+          const t0 = u0 / bays * len, t1 = (u0 + w) / bays * len;
+          const A = [ax + tx * t0, az + tz * t0], B = [ax + tx * t1, az + tz * t1];
+          const A2 = [A[0] + nx * D, A[1] + nz * D], B2 = [B[0] + nx * D, B[1] + nz * D];
+          const v0 = (y0 - base) * 1000 / floorH, v1 = (y1 - base) * 1000 / floorH, dU = D * 1000 / bay;
+          quadN(c, [[A2[0], y0, A2[1]], [B2[0], y0, B2[1]], [B2[0], y1, B2[1]], [A2[0], y1, A2[1]]], [nx, 0, nz], [0, v0, w, v0, w, v1, 0, v1], wallC, bid, biy, base, iw);
+          quadN(c, [[A[0], y0, A[1]], [A2[0], y0, A2[1]], [A2[0], y1, A2[1]], [A[0], y1, A[1]]], [-tx, 0, -tz], [0, v0, dU, v0, dU, v1, 0, v1], wallC, bid, biy, base, iw);
+          quadN(c, [[B2[0], y0, B2[1]], [B[0], y0, B[1]], [B[0], y1, B[1]], [B2[0], y1, B2[1]]], [tx, 0, tz], [0, v0, dU, v0, dU, v1, 0, v1], wallC, bid, biy, base, iw);
+          quadN(c, [[A[0], y0, A[1]], [B[0], y0, B[1]], [B2[0], y0, B2[1]], [A2[0], y0, A2[1]]], [0, -1, 0], [0, 0, w, 0, w, dU, 0, dU], wallC, bid, biy, base, iw);
+          quadN(c, [[A[0], y1, A[1]], [B[0], y1, B[1]], [B2[0], y1, B2[1]], [A2[0], y1, A2[1]]], [0, 1, 0], [0, 0, w, 0, w, dU, 0, dU], wallC, bid, biy, base, iw);
+          stats.balconies = (stats.balconies || 0) + 1;
+        }
+      }
+    }
 
     // roof
     // >= 100 tells the shader this is a roof: 110 flat, 111 hipped, 112 pyramid, 113 metal, 114 dome, 115 minaret, 116 gabled

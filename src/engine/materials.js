@@ -237,7 +237,7 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
       else if (h < (style > 2.5 && !shop ? .35 : .22) * (wallRole < 0.5 ? 1.0 : .5)) row = 0.0;
     }
     // rear and courtyard walls: narrower utility / kitchen windows
-    float squeeze = wallRole > 1.5 ? 1.6 : 1.0, cx = .5 + (cell.x - .5) * squeeze;
+    float squeeze = wallRole > 1.5 && wallRole < 2.5 ? 1.6 : 1.0, cx = .5 + (cell.x - .5) * squeeze;
     bool margin = cx < .015 || cx > .985;
     cx = clamp(cx, .015, .985);
     vec2 auv = vec2((style + cx) * .125, (row == 0.0 ? 0.0 : .5) + cell.y * .5);
@@ -245,7 +245,22 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
     vec3 tex = textureGrad(uFacade, auv, dx, dy).rgb;
     vec3 msk = textureGrad(uMask, auv, dx, dy).rgb;
     if (margin) { tex = vec3(.97); msk = vec3(1.0, 0.0, .5); } // plain wall beside the narrow window
-    if (wallRole > 2.5) {
+    if (wallRole > 3.5) {
+      // 3D balcony stack: slab edge, parapet or railing, then the open recess or cam balkon glazing per floor
+      float cy = fract(vFacade.y);
+      if (abs(vWNorm.y) > .5) { tex = vec3(.82); msk = vec3(.3, 0.0, .5); }                       // slab soffit / top
+      else if (cy < .07) { tex = vec3(.88); msk = vec3(.15, 0.0, .78); }                          // slab edge
+      else if (cy < .38) {
+        if (style > 3.5 || seed > .55) { tex = vec3(.96); msk = vec3(1.0, 0.0, .55); }            // solid parapet
+        else {
+          float bar = step(.72, fract(vFacade.x * 14.0)) + step(.33, cy);
+          tex = mix(vec3(.13, .13, .14), vec3(.36, .37, .38), clamp(bar, 0.0, 1.0)); msk = vec3(0.0, 0.0, bar > .5 ? .75 : .3); // railing, dark gap
+        }
+      } else if (style > 3.5) {
+        float fr = clamp(step(.93, fract(vFacade.x * 3.0)) + step(.95, cy), 0.0, 1.0);          // folding cam balkon panes
+        tex = mix(vec3(.3, .4, .45), vec3(.86), fr); msk = vec3(0.0, 1.0 - fr, fr > .5 ? .72 : .3);
+      } else { tex = vec3(.2, .19, .18); msk = vec3(0.0, 0.0, .3); }                              // shaded open recess
+    } else if (wallRole > 2.5) {
       // blind party wall (sağır cephe): plain plaster with floor-slab lines, no openings
       float sfw = fwidth(vFacade.y), slab = 1.0 - smoothstep(.025, .025 + sfw * 1.5, abs(fract(vFacade.y + .5) - .5));
       tex = vec3(.9) * (1.0 - .08 * slab * clamp(1.0 - sfw * 2.0, 0.0, 1.0));
