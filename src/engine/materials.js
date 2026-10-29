@@ -221,7 +221,9 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
 {
   // info.y: style + wallRole * 16 on walls, 100 + roof style on roofs; info.w: floors + seed
   // round first: interpolated varyings can land a hair below the packed integer
-  float iy = floor(vInfo.y + .5), id = floor(vInfo.x + .5), floors = floor(vInfo.w), seed = fract(vInfo.w);
+  // info.w = floors + (archetype + seed) / 8
+  float iy = floor(vInfo.y + .5), id = floor(vInfo.x + .5), floors = floor(vInfo.w), aw = fract(vInfo.w) * 8.0;
+  float arche = floor(aw), seed = fract(aw);
   float style = mod(iy, 16.0), wallRole = floor(iy / 16.0), rStyle = iy - 100.0;
   vec3 tint = pow(vColor, vec3(2.2)); // vertex colours are stored as sRGB bytes
   vec3 albedo;
@@ -230,7 +232,10 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
     vec2 cell = fract(vFacade);
     float h = tzHash3(vec3(bay, fl, id));
     float row = 1.0;
-    bool shop = style < 1.5 || (style > 3.5 && style < 4.5) || (style > 5.5 && style < 6.5);
+    bool coastal = arche > .5 && arche < 1.5;
+    bool shop = style < 1.5 || (style > 3.5 && style < 4.5) || (style > 5.5 && style < 6.5) || coastal;
+    // coastal high streets: houses get the apartment shopfront column on the street front
+    float aStyle = coastal && style > 2.5 && style < 3.5 && fl < .5 && wallRole < .5 ? 0.0 : style;
     if (fl < 0.5 && wallRole < 1.5) {
       // ground floor: shops and vitrines only on the street front, doors / bay doors elsewhere
       if (wallRole < 0.5 && shop) row = 0.0;
@@ -240,7 +245,7 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
     float squeeze = wallRole > 1.5 && wallRole < 2.5 ? 1.6 : 1.0, cx = .5 + (cell.x - .5) * squeeze;
     bool margin = cx < .015 || cx > .985;
     cx = clamp(cx, .015, .985);
-    vec2 auv = vec2((style + cx) * .125, (row == 0.0 ? 0.0 : .5) + cell.y * .5);
+    vec2 auv = vec2((aStyle + cx) * .125, (row == 0.0 ? 0.0 : .5) + cell.y * .5);
     vec2 dx = dFdx(vFacade) * vec2(.125 * squeeze, .5), dy = dFdy(vFacade) * vec2(.125 * squeeze, .5);
     vec3 tex = textureGrad(uFacade, auv, dx, dy).rgb;
     vec3 msk = textureGrad(uMask, auv, dx, dy).rgb;
@@ -251,7 +256,10 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
       if (abs(vWNorm.y) > .5) { tex = vec3(.82); msk = vec3(.3, 0.0, .5); }                       // slab soffit / top
       else if (cy < .07) { tex = vec3(.88); msk = vec3(.15, 0.0, .78); }                          // slab edge
       else if (cy < .38) {
-        if (style > 3.5 || seed > .55) { tex = vec3(.96); msk = vec3(1.0, 0.0, .55); }            // solid parapet
+        if (arche > 3.5 && arche < 4.5) {                                                          // frameless glass railing with an anthracite cap
+          float cap = step(.34, cy);
+          tex = mix(vec3(.45, .58, .6), vec3(.17, .18, .19), cap); msk = vec3(0.0, .55 * (1.0 - cap), mix(.4, .75, cap));
+        } else if (style > 3.5 || seed > .55) { tex = vec3(.96); msk = vec3(1.0, 0.0, .55); }            // solid parapet
         else {
           float bar = step(.72, fract(vFacade.x * 14.0)) + step(.33, cy);
           tex = mix(vec3(.13, .13, .14), vec3(.36, .37, .38), clamp(bar, 0.0, 1.0)); msk = vec3(0.0, 0.0, bar > .5 ? .75 : .3); // railing, dark gap
@@ -269,9 +277,93 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
       tex = vec3(.9) * (1.0 - .08 * slab * clamp(1.0 - sfw * 2.0, 0.0, 1.0));
       msk = vec3(1.0, 0.0, 0.0);
     }
-    // shop awnings take a per-shop colour
+    // coastal apartments: painted timber shutters beside the upper windows
+    if (coastal && row > .5 && style < .5 && wallRole < 1.5 && vFacade.y > 1.0 && vFacade.y < floors + .02) {
+      float sh = step(.1, cx) * step(cx, .19) + step(.81, cx) * step(cx, .9);
+      if (sh > .5 && cell.y > .28 && cell.y < .84) {
+        vec3 shc = fract(seed * 5.7) < .4 ? vec3(.3, .42, .3) : fract(seed * 5.7) < .7 ? vec3(.24, .4, .44) : vec3(.42, .3, .22);
+        tex = shc * (.85 + .15 * step(.5, fract(cell.y * 14.0))); msk = vec3(0.0, 0.0, .7);
+      }
+    }
+    // dense mahalles (Phase 4.2): 2 1980s-90s mosaic apartments, 3 TOKİ estates, 4 yeni nesil site
+    if (arche > 1.5 && arche < 4.5 && wallRole < 2.5 && vFacade.y > 0.0) {
+      bool plaster = msk.r > .5 && msk.g < .1, upper = vFacade.y > 1.0;
+      if (arche < 2.5) {
+        // mosaic tile cladding on the spandrels below the windows (or the whole wall on some blocks)
+        if (plaster && upper && (cell.y < .28 || seed < .35)) {
+          vec2 pm = vec2(vFacade.x * 3.0, vFacade.y * 3.05) * 10.0, tc = floor(pm), tf = fract(pm);
+          float fwt = max(fwidth(pm.x), fwidth(pm.y)), fade = clamp(1.5 - fwt * 2.0, 0.0, 1.0);
+          float grout = 1.0 - smoothstep(.0, .08 + fwt, min(min(tf.x, 1.0 - tf.x), min(tf.y, 1.0 - tf.y)));
+          vec3 mos = fract(seed * 3.7) < .45 ? vec3(.62, .38, .3) : fract(seed * 3.7) < .75 ? vec3(.55, .62, .66) : vec3(.72, .64, .52);
+          mos *= .86 + .22 * mix(.5, tzHash(tc + id), fade);
+          tex = mix(mos, vec3(.8), grout * .6 * fade); msk = vec3(0.0, 0.0, mix(.55, .4, grout * fade));
+        }
+      } else if (arche < 3.5) {
+        // estate accent bands: ground floor, top floor and the stair-core bay column in a shared accent colour
+        float ak = fract(seed * 3.1);
+        vec3 acc = ak < .4 ? vec3(.71, .4, .29) : ak < .7 ? vec3(.54, .36, .27) : vec3(.77, .52, .33);
+        bool band = fl < .5 || (fl > floors - 1.5 && vFacade.y < floors + .02) || abs(mod(bay, 4.0) - floor(fract(seed * 7.9) * 4.0)) < .5;
+        if (plaster && band && wallRole < 1.5) tint = pow(acc, vec3(2.2));
+        if (vFacade.y > floors + .02) tex = mix(tex, acc * 1.1, .7); // coloured parapet band
+      } else {
+        // yeni nesil site: anthracite panel columns, frames and top band; glass balcony railings
+        vec3 anth = vec3(.17, .18, .19);
+        bool col = mod(bay + floor(seed * 3.0), 3.0) < .5 && wallRole < 1.5;
+        if (plaster && upper && (col || vFacade.y > floors + .02)) { tex = anth; msk = vec3(0.0, 0.0, .55); }
+        else if (msk.r < .2 && msk.g < .1 && row > .5) {
+          if (cell.y > .23 && cell.y < .39 && cx > .1 && cx < .9) { tex = mix(vec3(.5, .62, .64), anth, step(.36, cell.y)); msk = vec3(0.0, step(cell.y, .36) * .5, .4); }
+          else tex = anth;
+        }
+      }
+    }
+    // northern villas (Phase 4.3): stone ground floor, stucco or timber upper floor, garden sliding doors
+    if (arche > 4.5 && arche < 5.5 && wallRole < 2.5 && vFacade.y > 0.0) {
+      bool plaster = msk.r > .5 && msk.g < .1;
+      if (fl < .5 && wallRole > .5 && h < .7 && cell.y < .8) {
+        // full-height sliding patio door facing the yard, slim anthracite frame and a centre meeting rail
+        float fr = max(step(abs(cell.x - .5), .012), step(.37, abs(cell.x - .5))) + step(.75, cell.y) + step(cell.y, .04);
+        if (abs(cell.x - .5) < .4) { tex = mix(vec3(.3, .38, .42), vec3(.2, .21, .22), clamp(fr, 0.0, 1.0)); msk = vec3(0.0, fr > .5 ? 0.0 : 1.0, fr > .5 ? .72 : .3); plaster = false; }
+      }
+      if (plaster && fl < .5) {
+        // split-face natural stone cladding in irregular courses
+        vec2 pm = vec2(vFacade.x * 3.4, vFacade.y * 3.05);
+        float course = floor(pm.y / .22), jx = fract(pm.x / (.32 + .2 * tzHash(vec2(course, id))) + tzHash(vec2(id, course))), jy = fract(pm.y / .22);
+        float fwm = max(fwidth(pm.x), fwidth(pm.y)) * 1.5, fade = clamp(1.0 - fwm * 5.0, 0.0, 1.0);
+        float joint = max(1.0 - smoothstep(.0, .05 + fwm * 4.0, min(jx, 1.0 - jx)), 1.0 - smoothstep(.0, .06 + fwm * 4.0, min(jy, 1.0 - jy)));
+        vec3 stone = mix(vec3(.64, .55, .43), vec3(.5, .44, .37), tzHash(vec2(floor(pm.x / .3), course) + id)) * (.9 + .15 * fract(seed * 11.0));
+        tex = mix(stone, stone * .55, joint * fade); msk = vec3(0.0, 0.0, mix(.6, .3, joint * fade));
+      } else if (plaster && seed > .62 && vFacade.y < floors + .02) {
+        // horizontal larch boarding on the upper floor
+        float bd = fract(vFacade.y * 3.05 / .14), fwb = fwidth(vFacade.y * 3.05 / .14);
+        vec3 wood = vec3(.55, .38, .24) * (.9 + .12 * tzHash(vec2(floor(vFacade.y * 3.05 / .14), floor(vFacade.x * 2.0)) + id));
+        tex = mix(wood, wood * .6, (1.0 - smoothstep(.0, .12 + fwb, bd)) * clamp(1.0 - fwb * 2.0, 0.0, 1.0)); msk = vec3(0.0, 0.0, .5 + .15 * step(.5, bd));
+      }
+    }
+    // OSB halls (Phase 4.4): corporate fascia band under the roof edge, truck docks on big warehouses
+    if (arche > 5.5 && wallRole < 2.5 && vFacade.y > 0.0) {
+      float ak = fract(seed * 4.3);
+      vec3 acc = ak < .25 ? vec3(.1, .27, .58) : ak < .45 ? vec3(.68, .13, .11) : ak < .6 ? vec3(.14, .44, .25) : ak < .75 ? vec3(.86, .45, .1) : vec3(.68, .7, .72);
+      float fb = floors - vFacade.y;
+      if (fb < .2 && fb > -.3) { tex = fb < .03 && fb > -.02 ? vec3(.92) : acc; msk = vec3(0.0, 0.0, .6); }
+      if (arche > 6.5 && fl < .5 && wallRole < .5 && mod(bay, 3.0) < 1.5) {
+        // dock bay: black rubber shelter, sectional overhead door with panel grooves, two rubber bumpers
+        float ax = abs(cell.x - .5);
+        if (ax < .36 && cell.y < .72) {
+          tex = vec3(.07); msk = vec3(0.0, 0.0, .65);
+          if (ax < .3 && cell.y > .1 && cell.y < .66) {
+            float pg = fract((cell.y - .1) / .56 * 6.0), fwp = fwidth(cell.y) * 10.7;
+            tex = vec3(.8, .81, .8) * (1.0 - .35 * (1.0 - smoothstep(.0, .08 + fwp, pg)));
+            if (abs(cell.y - .43) < .03 && ax < .26) tex = vec3(.35, .42, .46); // vision panel row
+            msk = vec3(0.0, 0.0, .45 + .1 * step(.5, pg));
+          }
+        }
+        if (ax > .2 && ax < .27 && cell.y < .1) { tex = vec3(.04); msk = vec3(0.0, 0.0, .8); }
+      }
+    }
+    // shop awnings take a per-shop colour; coastal awnings are striped canvas
     vec3 awn = mix(vec3(.62,.2,.16), mix(vec3(.16,.32,.5), vec3(.75,.58,.2), step(.5, fract(h * 7.0))), step(.4, h));
-    bool awning = style < 0.5 || (style > 3.5 && style < 4.5);
+    if (coastal) awn = mix(awn, vec3(.93, .9, .82), step(.5, fract(cell.x * 7.0)));
+    bool awning = aStyle < 0.5 || (style > 3.5 && style < 4.5);
     if (row == 0.0 && wallRole < 0.5 && awning && cell.y > .72 && cell.y < .88 && cell.x > .04 && cell.x < .96) tex = mix(tex, awn, .85);
     if (row == 0.0 && wallRole < 0.5 && style > 5.5 && style < 6.5 && cell.y > .74 && cell.y < .94) tex = mix(tex, awn * 1.2, .8); // retail fascia
     albedo = mix(tex, tex * tint, msk.r);

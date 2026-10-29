@@ -133,6 +133,18 @@ const HANGAR_WALLS = ['#8fa3b0', '#a7b4b8', '#7f97a6', '#b9bfbc', '#9aa8a2', '#c
 // per style: wall palette and window-bay width (m)
 const STYLE_WALLS = [WALLS, GLASS_WALLS, INDUSTRIAL_WALLS, HOUSE_WALLS, BRICK_WALLS, PUBLIC_WALLS, RETAIL_WALLS, HANGAR_WALLS];
 const BAY = [3.1, 2.6, 6, 3.4, 3.0, 3.6, 4.5, 8];
+// Phase 4 mahalle groups and palettes
+const COASTAL_MAH = new Set(['Postane', 'Cami', 'İstasyon', 'Evliya Çelebi', 'Tuzla']);
+const COASTAL_WALLS = ['#efe2c4', '#e8cf9e', '#f3ece0', '#e2b98f', '#ead9bd', '#d9a888', '#f1e6cf', '#dcc29a'].map(hex);
+// northern villa estates: white stucco / warm render above a stone ground floor, low clay or slate roofs
+const VILLA_MAH = new Set(['Tepeören', 'Akfırat', 'Orhanlı', 'Fatih', 'Anadolu', 'Mescit']);
+const VILLA_WALLS = ['#f3efe6', '#efe6d2', '#e9dcc3', '#f6f3ec', '#e4d3b8', '#ead8bd'].map(hex);
+const VILLA_TILES = ['#9c4e38', '#844232', '#5a5652'].map(hex);
+const DENSE_MAH = new Set(['Aydıntepe', 'İçmeler', 'Yayla', 'Şifa', 'Mimar Sinan', 'Orta', 'Aydınlı', 'Evliya Çelebi']);
+// TOKİ / Kiptaş estates: warm sand and dual-tone beige plaster, one colour per estate
+const ESTATE_WALLS = ['#e8d5b0', '#e6c9a8', '#efe0c6', '#dcc0a0', '#e9dccb', '#e3cdb4'].map(hex);
+// yeni nesil site: white and light grey composite panels (anthracite trim comes from the shader)
+const SITE_WALLS = ['#f2f2ef', '#e9eaea', '#dcdedd', '#f4f1ea', '#d2d4d4', '#e6e4df'].map(hex);
 // Tersaneler (shipyard bay): 40.822..40.840 N, 29.275..29.298 E
 const [SYX0, SYZ1] = toWorld(40.822, 29.275), [SYX1, SYZ0] = toWorld(40.840, 29.298);
 const inShipyard = (x, z) => x > SYX0 && x < SYX1 && z > SYZ0 && z < SYZ1;
@@ -207,7 +219,13 @@ function build({ osm, terrain, ground, options }) {
     c.info.push4(bid, iy, rel, iw);
     return c.v++;
   }
-  const packW = (floors, seed) => Math.floor(floors) + Math.min(.9999, Math.max(.0001, seed));
+  // info.w = floors + (archetype + seed) / 8: archetype 0 generic, 1 coastal/historic, 2 dense 1980s-90s,
+  // 3 TOKİ/Kiptaş estate, 4 yeni nesil site, 5 suburban villa, 6 OSB industrial
+  const packW = (floors, seed, arche = 0) => Math.floor(floors) + (arche + Math.min(.998, Math.max(.002, seed))) / 8;
+
+  // mahalle of a point: the nearest suburb/town label
+  const SUBURBS = osm.pois.filter(p => (p[3] === 'suburb' || p[3] === 'town') && p.wx !== undefined).map(p => [p[0], p.wx, p.wz]);
+  const mahalleOf = (x, z) => { let best = '', bd = Infinity; for (const [nm, sx, sz] of SUBURBS) { const d = (sx - x) ** 2 + (sz - z) ** 2; if (d < bd) { bd = d; best = nm; } } return best; };
   function faceNormal(ax, ay, az, bx, by, bz, cx, cy, cz) {
     const ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz) || 1;
@@ -257,6 +275,7 @@ function build({ osm, terrain, ground, options }) {
   const tTopo = performance.now();
   const { isNearRoad, rings, holesOf, partyWall, dup } = urbanTopology(osm.roads, osm.buildings, terrain.bounds);
   stats.topologyMs = Math.round(performance.now() - tTopo);
+  const estateOf = estates(osm.buildings, rings, dup);
   for (let bid = 0; bid < total; bid++) {
     if (bid % 2000 === 0) progress('buildings', bid / total);
     const b = osm.buildings[bid];
@@ -270,6 +289,10 @@ function build({ osm, terrain, ground, options }) {
     const r1 = hash2(cx * 13.1, cz * 7.7), r2 = hash2(cx + 3.3, cz - 9.1), r3 = hash2(cz * 5.3, cx * 2.9);
     const lc = landAt(cx, cz);
     const industrial = b[3] === 2 || (lc === 1 && area > 250) || area > 3200;
+    const mah = mahalleOf(cx, cz), dense = DENSE_MAH.has(mah);
+    // TOKİ / Kiptaş estate: the whole group shares one hash for palette, height and roof
+    const est = dense && !industrial && estateOf[bid] >= 0 ? estateOf[bid] : -1;
+    const eh = est >= 0 ? hash2(est * .731, est * .117 + 4.1) : 0;
 
     // heights in metres: OSM tags first, otherwise an estimate quantised to floors
     let floorH = industrial ? 5 : 3.05, floors, heightM, known = 0;
@@ -285,6 +308,7 @@ function build({ osm, terrain, ground, options }) {
       else if (area < 1600) floors = 5 + Math.round(r1 * 5);
       else floors = 4 + Math.round(r1 * 4);
       heightM = floors * floorH + (industrial ? 0 : .6);
+      if (est >= 0) { floors = 5 + Math.floor(eh * 7) + (r1 > .8); heightM = floors * floorH + .6; }
     }
     // wall topology: 0 street front, 1 side, 2 rear/courtyard, 3 blind party wall
     const positive = sa >= 0, roles = new Uint8Array(n);
@@ -323,6 +347,10 @@ function build({ osm, terrain, ground, options }) {
     else if (floors >= 9) style = 1;
     else if (floors <= 2 && area < 200 || kind === 3 && floors <= 3) style = 3;
     else style = (partyLen > perim * .18 && floors >= 3) || r2 < .18 ? 4 : 0;
+    // dense mahalles: estates and new residential towers are plastered apartment blocks, not curtain walls
+    const villa = style === 3 && !industrial && (VILLA_MAH.has(mah) || cz < 1.8);
+    const site = dense && est < 0 && (kind === 1 || kind === 0 && b[2]) && floors >= 5 && style !== 4 && (floors >= 9 || r3 > .62);
+    if ((est >= 0 || site) && style === 1) style = 0;
 
     // roof type: 0 flat, 1 hipped, 2 pyramidal, 3 gabled; explicit roofShape (b[6]) wins over heuristics
     const convex = isConvex(ring), quad = n === 4 && convex, pitchable = !holes && !industrial && convex;
@@ -331,6 +359,9 @@ function build({ osm, terrain, ground, options }) {
     if (rs === 2) roofType = !pitchable ? 0 : quad ? 1 : n <= 10 ? 2 : 0;
     else if (rs === 3) roofType = !pitchable ? 0 : quad ? 3 : n <= 10 ? 2 : 0;
     else if (rs === 4) roofType = pitchable && n <= 12 ? 2 : 0;
+    else if (rs === 0 && est >= 0) roofType = pitchable && n <= 10 && eh < .55 ? (quad ? 1 : 2) : 0;
+    else if (rs === 0 && site) roofType = 0;
+    else if (rs === 0 && villa && pitchable && n <= 10) roofType = quad ? (r3 < .25 ? 3 : 1) : 2;
     else if (rs === 0 && pitchable && style !== 1 && style !== 6 && n <= 10 && area < 1300 && r3 < (style === 3 ? .92 : .78)) roofType = quad ? (style === 3 && r3 < .35 ? 3 : 1) : 2;
     // L-shaped plans (6 orthogonal corners): two overlapping hipped wings (roofType 4 while building, reported as hipped)
     let lWings = null;
@@ -340,13 +371,23 @@ function build({ osm, terrain, ground, options }) {
     }
     const PARAPET = .00055, parapet = roofType === 0 && !industrial && !holes && area >= 55 && style !== 2 && style !== 7;
 
+    // mahalle archetypes (Phase 4)
+    let arche = 0, palette = STYLE_WALLS[style], pr = r2;
+    if (COASTAL_MAH.has(mah) && cz > 5.8 && (style === 0 || style === 3 || style === 4 || style === 6)) { arche = 1; palette = COASTAL_WALLS; }
+    else if (est >= 0) { arche = 3; palette = ESTATE_WALLS; pr = eh; }
+    else if (site) { arche = 4; palette = SITE_WALLS; }
+    else if (dense && style === 4) arche = 2;
+    else if (villa) { arche = 5; palette = VILLA_WALLS; }
+    else if (industrial && (style === 2 || style === 7) && !inShipyard(cx, cz)) arche = area > 1200 ? 7 : 6; // OSB hall; 7 with loading docks
+    stats.arche = stats.arche || [0, 0, 0, 0, 0, 0, 0, 0]; stats.arche[arche]++;
+
     // colours
     stats.styles[style]++;
-    let wallC = tagColour(b[5]) || pick(STYLE_WALLS[style], r2);
+    let wallC = tagColour(b[5]) || pick(palette, pr);
     let roofC = tagColour(b[4]);
     if (!roofC) {
       const s = sat(cx, cz);
-      if (roofType) roofC = pick(TILES, r3);
+      if (roofType) roofC = arche === 5 ? pick(VILLA_TILES, r3) : pick(TILES, est >= 0 ? eh * 3.7 % 1 : r3);
       else if (industrial) roofC = s ? mix(pick(METAL, r3), s, area > 2500 ? .75 : .45) : pick(METAL, r3);
       else roofC = s ? mix(pick(FLAT, r3), s, .3) : pick(FLAT, r3);
     }
@@ -359,12 +400,12 @@ function build({ osm, terrain, ground, options }) {
     // stone/concrete plinth absorbs the slope down to 1.2 m below each corner
     const hKm = heightM / 1000, base = gMax + .0003, top = base + hKm;
     const minKm = Math.min(b[7] || 0, heightM - 1) / 1000, floating = minKm > 0;
-    const seed = r1;
+    const seed = est >= 0 ? eh * 5.3 % 1 : r1; // estates share window lighting, balcony and accent choices
     const c = getChunk(cx, cz);
 
     // walls (each edge spans a whole number of window bays)
     const bay = BAY[style];
-    const iw = packW(floors, seed);
+    const iw = packW(floors, seed, arche);
     const topW = top + (parapet ? PARAPET : 0); // flat terraces get a parapet rising above the roof
     const walls = (r, outward, role) => {
       const m = r.length / 2;
@@ -427,7 +468,7 @@ function build({ osm, terrain, ground, options }) {
     // >= 100 tells the shader this is a roof: 110 flat, 111 hipped, 112 pyramid, 113 metal, 114 dome, 115 minaret,
     // 116 gabled, 117 eave soffit / fascia, 118 parapet coping
     const roofStyle = roofType === 3 ? 116 : 110 + roofType;
-    const EAVE = .0004, FASCIA = .00012;
+    const EAVE = arche === 5 ? .00055 : .0004, FASCIA = .00012, PITCH = arche === 5 ? .75 : 1; // villas: generous saçak, low slope
     const T = (q, y = top, rel = hKm) => [q[0], y, q[1], rel];
     const eaveOf = (a, b2) => { const ex = b2[0] - a[0], ez = b2[1] - a[1], l = Math.hypot(ex, ez) || 1; return [a[0], a[1], ex / l, ez / l]; };
     /** Sloped underside from the wall top P to the eave rim E (dropped by `drop`), plus a thin fascia on the rim. */
@@ -452,7 +493,7 @@ function build({ osm, terrain, ground, options }) {
       let qx = 0, qz = 0; for (const q of Q) { qx += q[0] / 4; qz += q[1] / 4; }
       const ux = ((Q[1][0] - Q[0][0]) + (Q[2][0] - Q[3][0])) / 2, uz = ((Q[1][1] - Q[0][1]) + (Q[2][1] - Q[3][1])) / 2, ul = Math.hypot(ux, uz);
       const dxu = ux / ul, dzu = uz / ul, half = gable ? L / 2 : Math.max(0, (L - Wd) / 2);
-      const rh = Math.min(gable ? 4.2 : 3.6, Math.max(1.3, Wd * 1000 * (gable ? .32 : .26))) / 1000;
+      const rh = Math.min(gable ? 4.2 : 3.6, Math.max(1.3, Wd * 1000 * (gable ? .32 : .26) * PITCH)) / 1000;
       const ry = top + rh, rrel = hKm + rh, drop = EAVE * rh / (Wd / 2); ridgeH = Math.max(ridgeH, rh);
       // gabled ridge ends sit exactly over the short-edge midpoints so the gable walls stay vertical; the roof runs on past them
       const R1 = gable ? [(Q[3][0] + Q[0][0]) / 2, ry, (Q[3][1] + Q[0][1]) / 2, rrel] : [qx - dxu * half, ry, qz - dzu * half, rrel];
@@ -490,7 +531,7 @@ function build({ osm, terrain, ground, options }) {
       built = hipQuad([0, 1, 2, 3].map(k => [ring[k * 2], ring[k * 2 + 1]]), roofType === 3, roofStyle);
       if (built) stats.pitched++;
     } else if (roofType === 2) {
-      const rh = Math.min(3.4, Math.max(1.2, Math.sqrt(area) * .22)) / 1000; ridgeH = rh;
+      const rh = Math.min(3.4, Math.max(1.2, Math.sqrt(area) * .22 * PITCH)) / 1000; ridgeH = rh;
       const apex = [cx, top + rh, cz, hKm + rh];
       const P = []; for (let i = 0; i < n; i++) P.push([ring[i * 2], ring[i * 2 + 1]]);
       const E = offsetPoly(P, EAVE), drop = EAVE * rh / (Math.sqrt(area) / 2000);
@@ -563,7 +604,31 @@ function build({ osm, terrain, ground, options }) {
             stats.solar = (stats.solar || 0) + 1;
           }
         }
-        if ((style === 2 || style === 6 || style === 7) && area > 450) {
+        if (arche >= 6 && style === 2 && area > 2800) {
+          // sawtooth (shed) roof: rows of north-light glazing with a metal back slope, ridges along the hall
+          const vx = -az, vz = ax, H = .0016, W = .0075, cs = [], ct = [];
+          for (let i = 0; i < n; i++) { const dx = ring[i * 2] - cx, dz = ring[i * 2 + 1] - cz; ct.push(dx * ax + dz * az); cs.push(dx * vx + dz * vz); }
+          const spans = sv => {
+            const ts = [];
+            for (let i = 0; i < n; i++) { const j = (i + 1) % n, a = cs[i] - sv, b2 = cs[j] - sv; if ((a < 0) !== (b2 < 0)) ts.push(ct[i] + (ct[j] - ct[i]) * a / (a - b2)); }
+            ts.sort((p, q) => p - q); const out = []; for (let k = 0; k + 1 < ts.length; k += 2) out.push([ts[k], ts[k + 1]]); return out;
+          };
+          const s0 = Math.min(...cs), s1 = Math.max(...cs), P = (t, sv, y) => [cx + ax * t + vx * sv, y, cz + az * t + vz * sv];
+          let teeth = 0;
+          for (let sv = s0 + .003; sv + W < s1 - .002; sv += W) {
+            const A = spans(sv), B = spans(sv + W);
+            for (const [a0, a1] of A) for (const [b0, b1] of B) {
+              const t0 = Math.max(a0, b0) + .0012, t1 = Math.min(a1, b1) - .0012; if (t1 - t0 < .004) continue;
+              const L = (t1 - t0) * 1000, lo = roofY + .00005, hi = lo + H;
+              quadN(c, [P(t0, sv, lo), P(t1, sv, lo), P(t1, sv, hi), P(t0, sv, hi)], [-vx, 0, -vz], [0, 0, L, 0, L, 1.6, 0, 1.6], wallC, bid, 122, base, iw);
+              const sl = Math.hypot(W, H), ny = W / sl, nh = H / sl;
+              quadN(c, [P(t0, sv, hi), P(t1, sv, hi), P(t1, sv + W, lo), P(t0, sv + W, lo)], [vx * nh, ny, vz * nh], [0, 0, L, 0, L, sl * 1000, 0, sl * 1000], roofC, bid, 113, base, iw);
+              for (const [t, d] of [[t0, -1], [t1, 1]]) quadN(c, [P(t, sv, lo), P(t, sv + W, lo), P(t, sv, hi), P(t, sv, hi)], [ax * d, 0, az * d], [0, 0, 7.5, 0, 0, 1.6, 0, 1.6], roofC, bid, 113, base, iw);
+              teeth++;
+            }
+          }
+          if (teeth) stats.sawtooth = (stats.sawtooth || 0) + 1;
+        } else if ((style === 2 || style === 6 || style === 7) && area > 450) {
           const span = Math.sqrt(area) / 1000;
           if (r3 < .5 || style === 6) {
             const units = area > 2500 ? 3 : area > 1000 ? 2 : 1;
@@ -826,6 +891,44 @@ function build({ osm, terrain, ground, options }) {
 
 /* ------------------------------------------------ urban topology rasters */
 // Kept out of build() so V8 optimises these hot loops on their own.
+/**
+ * Mass-housing estates (TOKİ / Kiptaş): mid-size blocks of near-identical footprint repeated within
+ * 150 m. Similar neighbours are linked and each connected group shares its lowest building id,
+ * which seeds the estate's coordinated palette, height and roofs. Returns -1 for non-estate buildings.
+ */
+function estates(buildings, rings, dup) {
+  const N = buildings.length, cxs = new Float32Array(N), czs = new Float32Array(N), ar = new Float32Array(N), nv = new Uint8Array(N);
+  const cand = [], G = .15, cells = new Map();
+  for (let i = 0; i < N; i++) {
+    const r = rings[i], k = buildings[i][3];
+    if (dup[i] || r.length < 8 || (k !== 1 && k !== 0)) continue;
+    const a = Math.abs(signedArea(r)) * 1e6; if (a < 280 || a > 750) continue;
+    let x = 0, z = 0; for (let j = 0; j < r.length; j += 2) { x += r[j]; z += r[j + 1]; }
+    cxs[i] = x / (r.length / 2); czs[i] = z / (r.length / 2); ar[i] = a; nv[i] = Math.min(255, r.length / 2);
+    const key = Math.floor(cxs[i] / G) * 65536 + Math.floor(czs[i] / G);
+    (cells.get(key) || cells.set(key, []).get(key)).push(i); cand.push(i);
+  }
+  const parent = new Int32Array(N).fill(-1), deg = new Uint8Array(N);
+  const find = i => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+  for (const i of cand) parent[i] = i;
+  for (const i of cand) {
+    const gx = Math.floor(cxs[i] / G), gz = Math.floor(czs[i] / G);
+    for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+      const L = cells.get((gx + ox) * 65536 + gz + oz); if (!L) continue;
+      for (const j of L) {
+        if (j <= i || Math.abs(nv[i] - nv[j]) > 2 || Math.abs(ar[i] / ar[j] - 1) > .12) continue;
+        if ((cxs[i] - cxs[j]) ** 2 + (czs[i] - czs[j]) ** 2 > G * G) continue;
+        deg[i] = Math.min(255, deg[i] + 1); deg[j] = Math.min(255, deg[j] + 1);
+        const a = find(i), b = find(j); if (a !== b) parent[Math.max(a, b)] = Math.min(a, b);
+      }
+    }
+  }
+  const out = new Int32Array(N).fill(-1), size = new Map();
+  for (const i of cand) if (deg[i] >= 3) { const r = find(i); size.set(r, (size.get(r) || 0) + 1); }
+  for (const i of cand) if (deg[i] >= 3 && size.get(find(i)) >= 6) out[i] = find(i);
+  return out;
+}
+
 function urbanTopology(roads, buildings, [bx0, bz0, bx1, bz1]) {
   const total = buildings.length;
   // road frontage raster: 6 m cells stamped within 18 m of driveable and pedestrian centrelines (12 m stride)
