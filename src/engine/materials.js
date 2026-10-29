@@ -113,26 +113,36 @@ ${NOISE}`)
       .replace('#include <color_fragment>', /* glsl */`
 float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0;
 {
-  float style = vInfo.y, id = vInfo.x, seed = vInfo.w;
+  // info.y: style + wallRole * 16 on walls, 100 + roof style on roofs; info.w: floors + seed
+  float id = vInfo.x, floors = floor(vInfo.w), seed = fract(vInfo.w);
+  float style = mod(vInfo.y, 16.0), wallRole = floor(vInfo.y / 16.0), rStyle = vInfo.y - 100.0;
   vec3 tint = pow(vColor, vec3(2.2)); // vertex colours are stored as sRGB bytes
   vec3 albedo;
-  if (style < 9.5) {
+  if (vInfo.y < 99.5) {
     float fl = floor(vFacade.y), bay = floor(vFacade.x);
     vec2 cell = fract(vFacade);
     float h = tzHash3(vec3(bay, fl, id));
     float row = 1.0;
-    if (fl < 0.5) {
-      // ground floor: shops on apartments and glass towers, occasional doors elsewhere
-      if (style < 0.5 || (style > 0.5 && style < 1.5)) row = 0.0;
-      else if (h < (style > 2.5 ? .35 : .22)) row = 0.0;
+    if (fl < 0.5 && wallRole < 1.5) {
+      // ground floor: shops only on the street front of apartments and towers, occasional doors elsewhere
+      if (wallRole < 0.5 && style < 1.5) row = 0.0;
+      else if (h < (style > 2.5 ? .35 : .22) * (wallRole < 0.5 ? 1.0 : .5)) row = 0.0;
     }
-    vec2 auv = vec2((style + cell.x) * .25, (row == 0.0 ? 0.0 : .5) + cell.y * .5);
+    // rear and courtyard walls: narrower utility / kitchen windows
+    float cx = wallRole > 1.5 ? clamp(.5 + (cell.x - .5) * 1.6, 0.0, 1.0) : cell.x;
+    vec2 auv = vec2((style + cx) * .25, (row == 0.0 ? 0.0 : .5) + cell.y * .5);
     vec2 dx = dFdx(vFacade) * vec2(.25, .5), dy = dFdy(vFacade) * vec2(.25, .5);
     vec3 tex = textureGrad(uFacade, auv, dx, dy).rgb;
     vec3 msk = textureGrad(uMask, auv, dx, dy).rgb;
+    if (wallRole > 2.5) {
+      // blind party wall (sağır cephe): plain plaster with floor-slab lines, no openings
+      float sfw = fwidth(vFacade.y), slab = 1.0 - smoothstep(.025, .025 + sfw * 1.5, abs(fract(vFacade.y + .5) - .5));
+      tex = vec3(.9) * (1.0 - .08 * slab * clamp(1.0 - sfw * 2.0, 0.0, 1.0));
+      msk = vec3(1.0, 0.0, 0.0);
+    }
     // shop awnings take a per-shop colour
     vec3 awn = mix(vec3(.62,.2,.16), mix(vec3(.16,.32,.5), vec3(.75,.58,.2), step(.5, fract(h * 7.0))), step(.4, h));
-    if (row == 0.0 && style < 0.5 && cell.y > .72 && cell.y < .88 && cell.x > .04 && cell.x < .96) tex = mix(tex, awn, .85);
+    if (row == 0.0 && wallRole < 0.5 && style < 0.5 && cell.y > .72 && cell.y < .88 && cell.x > .04 && cell.x < .96) tex = mix(tex, awn, .85);
     albedo = mix(tex, tex * tint, msk.r);
     // plinth below the ground floor, soft contact shadow near the ground
     if (vFacade.y < 0.0) albedo = tint * .62;
@@ -150,7 +160,7 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0;
     albedo = mix(albedo, albedo * .45, tzGlass * uNight);
   } else {
     // roofs
-    vec2 p = vFacade;
+    vec2 p = vFacade; style = rStyle;
     if (style > 13.5 && style < 14.5) { albedo = tint * (.8 + .2 * vFacade.y / 6.0); tzRough = .45; }       // dome
     else if (style > 14.5) { albedo = tint * (.9 + .1 * step(.5, fract(vFacade.y * 6.0))); tzRough = .7; } // minaret
     else if (style > 10.5 && style < 12.5) {
