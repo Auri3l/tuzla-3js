@@ -467,6 +467,11 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
         albedo = mix(vec3(.05, .08, .16), vec3(.55, .57, .6), g * clamp(1.0 - fwidth(p.x) * 3.0, 0.0, 1.0)); tzRough = .22;
       } else if (style < 21.5) { albedo = vec3(.8, .81, .8) * (.9 + .1 * tzNoise(p * 4.0)); tzRough = .4; }               // tank / HVAC
       else if (style < 22.5) { albedo = vec3(.2, .27, .3); tzRough = .12; }                                              // skylight glazing
+      else if (style > 24.5) {                                                                                          // canvas awning
+        float stripe = arche > .5 && arche < 1.5 ? step(.5, fract(p.x * 7.0)) : 0.0;
+        albedo = mix(tint, vec3(.93, .9, .82), stripe) * (.88 + .12 * tzNoise(p * vec2(9.0, 3.0) + id)) * (vWNorm.y < -.3 ? .7 : 1.0);
+        tzRough = .85;
+      }
       else if (style > 23.5) { albedo = vec3(.85, .64, .26) * (.85 + .3 * max(0.0, vWNorm.y)); tzRough = .25; }          // gilded bronze alem
       else {                                                                                                            // brick chimney
         float course = floor(p.y / .075), j = fract(p.x / .22 + .5 * mod(course, 2.0));
