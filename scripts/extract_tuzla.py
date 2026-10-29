@@ -37,9 +37,60 @@ def number(t):
         return n
     except Exception:return None
 
+# Building tuple: [ring, height, levels, kind, roofColour, wallColour, roofShape, minH, holes].
+# kind 0 civic, 1 apartment, 2 industrial, 3 house, 4 commercial, 5 religious, 6 auxiliary, 7 sports.
+KIND_SETS=[
+ (5,{'mosque','place_of_worship','chapel','church','cathedral','temple','synagogue','shrine'}),
+ (0,{'school','university','college','kindergarten','hospital','clinic','public','civic','government','townhall','train_station','fire_station','police','library','post_office','courthouse'}),
+ (7,{'stadium','grandstand','sports_hall','riding_hall','pavilion','sports_centre'}),
+ (4,{'commercial','retail','supermarket','office','kiosk','shop','hotel','mall','marketplace'}),
+ (2,{'industrial','warehouse','factory','hangar','manufacture','storage_tank','silo','works'}),
+ (6,{'garage','garages','shed','greenhouse','farm_auxiliary','farm','service','transformer_tower','hut','carport','barn','stable','toilets'}),
+ (3,{'house','detached','semidetached_house','terrace','bungalow','villa','cabin'}),
+ (1,{'apartments','residential','dormitory'}),
+]
+ROOF_SHAPES={'flat':1,'hipped':2,'half-hipped':2,'side_hipped':2,'gabled':3,'saltbox':3,'gambrel':3,'mansard':3,'pyramidal':4,'dome':5,'onion':5,'skillion':6,'lean_to':6,'sawtooth':7,'round':7,'gothic':7}
+def building_kind(typ,tags):
+    vals={typ,(tags.get('amenity') or '').lower(),(tags.get('building:use') or '').lower(),(tags.get('leisure') or '').lower()}
+    if tags.get('shop'):vals.add('shop')
+    if tags.get('religion') and typ in ('yes','religious'):vals.add('place_of_worship')
+    for k,names in KIND_SETS:
+        if vals & names:return k
+    return 1  # 'yes' (any levels) and other unlisted types stay residential blocks
+def roof_shape(tags):
+    return ROOF_SHAPES.get((tags.get('roof:shape') or '').strip().lower(),0)
+def min_height(tags):
+    m=number(tags.get('min_height'))
+    if m is None:
+        lv=number(tags.get('building:min_level'))
+        m=lv*3.05 if lv is not None else None
+    return round(m,1) if m and 0<m<300 else 0
+def highway_like(tags):
+    return bool(tags.get('highway') or tags.get('railway') or tags.get('waterway') or tags.get('power') or tags.get('barrier'))
+def compact(b):
+    """Drop trailing default (0 / '' / []) optional fields after the colour slots."""
+    while len(b)>6 and b[-1] in (0,'',[],None):b.pop()
+    return b
+def join_rings(parts):
+    """Join open member ways of a multipolygon into closed coordinate rings."""
+    parts=[list(p) for p in parts if p and len(p)>=2]; rings=[]
+    while parts:
+        cur=parts.pop()
+        while cur[0]!=cur[-1]:
+            for i,p in enumerate(parts):
+                if p[0]==cur[-1]:cur+=p[1:]
+                elif p[-1]==cur[-1]:cur+=p[::-1][1:]
+                elif p[-1]==cur[0]:cur=p+cur[1:]
+                elif p[0]==cur[0]:cur=p[::-1]+cur[1:]
+                else:continue
+                parts.pop(i);break
+            else:break
+        if cur[0]==cur[-1] and len(cur)>=4:rings.append(cur)
+    return rings
+
 class Handler(osmium.SimpleHandler):
     def __init__(self):
-        super().__init__(); self.n={}; self.buildings=[]; self.roads=[]; self.land=[]; self.trees=[]; self.pois=[]; self.counts=collections.Counter(); self.start=time.time()
+        super().__init__(); self.n={}; self.wc={}; self.bidx={}; self.buildings=[]; self.roads=[]; self.land=[]; self.trees=[]; self.pois=[]; self.counts=collections.Counter(); self.start=time.time()
     def node(self,n):
         try: lon,lat=n.location.lon,n.location.lat
         except Exception:return
@@ -51,6 +102,9 @@ class Handler(osmium.SimpleHandler):
         if name and any(n.tags.get(x) for x in ['place','leisure','tourism','railway','amenity','historic','shop']) and poly.contains(Point(lon,lat)):
             self.pois.append([name,round(lat,6),round(lon,6),n.tags.get('place') or n.tags.get('leisure') or n.tags.get('tourism') or n.tags.get('railway') or n.tags.get('amenity') or n.tags.get('shop') or ''])
     def way(self,w):
+        if not highway_like(w.tags):
+            mc=[self.n.get(ref.ref) for ref in w.nodes]
+            if mc and all(c is not None for c in mc):self.wc[w.id]=mc  # possible multipolygon member (often untagged)
         building=w.tags.get('building') or w.tags.get('building:part')
         highway=w.tags.get('highway')
         railway=w.tags.get('railway')
@@ -67,23 +121,7 @@ class Handler(osmium.SimpleHandler):
         if len(valid)<2:return
         if building:
             if any(c is None for c in coords) or len(coords)<4 or coords[0]!=coords[-1]:return
-            mid=(sum(p[0] for p in coords[:-1])/(len(coords)-1),sum(p[1] for p in coords[:-1])/(len(coords)-1))
-            if not poly.contains(Point(*mid)):return
-            typ=building.lower()
-            if typ in ('no','roof','construction','ruins','demolished'):return
-            h=number(w.tags.get('height')); levels=number(w.tags.get('building:levels'))
-            if h is not None and not (2<=h<=350):h=None
-            if levels is not None and not (1<=levels<=80):levels=None
-            # Preserve known values; any later inferred height remains explicitly labelled as such.
-            kind=2 if typ in ('industrial','warehouse','factory','commercial','retail','supermarket','hangar','garage','garages','farm','farm_auxiliary') else (1 if typ in ('house','detached','semidetached_house','terrace','bungalow','residential','apartments','yes') else 0)
-            a=flat(coords[:-1])
-            if len(a)<6:return
-            roof=(w.tags.get('roof:colour') or w.tags.get('roof:color') or '')[:25]
-            wall=(w.tags.get('building:colour') or w.tags.get('building:color') or '')[:25]
-            self.buildings.append([a,round(h,1) if h else 0,round(levels,1) if levels else 0,kind,roof,wall])
-            self.counts['known_height' if h else ('known_levels' if levels else 'inferred')]+=1
-            if w.tags.get('name'):
-                self.pois.append([w.tags.get('name'),round(mid[1],6),round(mid[0],6),'building'])
+            self.add_building(w.tags,building,coords,[],w.id)
             return
         # The remaining line and polygon features can be clipped against the district.
         if highway and highway not in ('construction','proposed','abandoned'):
@@ -104,6 +142,55 @@ class Handler(osmium.SimpleHandler):
         if name and (leisure or amenity or (natural and natural not in ('coastline',))):
             mid=(sum(p[0] for p in valid)/len(valid),sum(p[1] for p in valid)/len(valid))
             if poly.contains(Point(*mid)):self.pois.append([name,round(mid[1],6),round(mid[0],6),leisure or amenity or natural])
+    def add_building(self,tags,building,coords,holes,wid=None):
+        mid=(sum(p[0] for p in coords[:-1])/(len(coords)-1),sum(p[1] for p in coords[:-1])/(len(coords)-1))
+        if not poly.contains(Point(*mid)):return
+        typ=building.lower()
+        if typ in ('no','roof','construction','ruins','demolished'):return
+        h=number(tags.get('height')); levels=number(tags.get('building:levels'))
+        if h is not None and not (2<=h<=350):h=None
+        if levels is not None and not (1<=levels<=80):levels=None
+        # Preserve known values; any later inferred height remains explicitly labelled as such.
+        kind=building_kind(typ,tags)
+        a=flat(coords[:-1])
+        if len(a)<6:return
+        roof=(tags.get('roof:colour') or tags.get('roof:color') or '')[:25]
+        wall=(tags.get('building:colour') or tags.get('building:color') or '')[:25]
+        hs=[flat(r[:-1]) for r in holes if len(r)>=4]
+        if wid is not None:self.bidx[wid]=len(self.buildings)
+        self.buildings.append([a,round(h,1) if h else 0,round(levels,1) if levels else 0,kind,roof,wall,roof_shape(tags),min_height(tags),hs])
+        self.counts['known_height' if h else ('known_levels' if levels else 'inferred')]+=1
+        if hs:self.counts['with_courtyard']+=1
+        if tags.get('name'):
+            self.pois.append([tags.get('name'),round(mid[1],6),round(mid[0],6),'building'])
+    def relation(self,r):
+        """Building multipolygons (type=multipolygon/building) with inner courtyard rings."""
+        if r.tags.get('type') not in ('multipolygon','building'):return
+        outer,inner=[],[]
+        for m in r.members:
+            if m.type!='w':continue
+            c=self.wc.get(m.ref)
+            if c is None:continue
+            (inner if m.role=='inner' else outer).append((m.ref,c))
+        if not outer:return
+        building=r.tags.get('building') or r.tags.get('building:part')
+        inner_rings=join_rings([c for _,c in inner])
+        if not building:
+            # Old-style tagging: the building tag sits on a single closed outer way.
+            if len(outer)==1 and outer[0][0] in self.bidx and inner_rings:
+                b=self.buildings[self.bidx[outer[0][0]]]
+                b[8]=b[8]+[flat(r_[:-1]) for r_ in inner_rings]
+                self.counts['with_courtyard']+=1
+            return
+        for ring in join_rings([c for _,c in outer]):
+            shp=Polygon(ring)
+            holes=[h_ for h_ in inner_rings if shp.contains(Point(*h_[0]))]
+            ids=[wid for wid,c in outer if c[0]==c[-1] and c==ring and wid in self.bidx]
+            if ids:  # outer way was already emitted as a building: attach the holes instead of duplicating
+                b=self.buildings[self.bidx[ids[0]]]
+                if holes:b[8]=b[8]+[flat(h_[:-1]) for h_ in holes]; self.counts['with_courtyard']+=1
+                continue
+            self.add_building(r.tags,building,ring,holes)
     def add_line(self,coords,out,kind):
         seq=[]
         def add(part):
@@ -126,10 +213,13 @@ class Handler(osmium.SimpleHandler):
 h=Handler()
 print('Reading',PBF,'boundary bbox',bbox,flush=True)
 h.apply_file(PBF, locations=False)
+h.wc.clear()
+h.buildings=[compact(b) for b in h.buildings]
+kind_counts=collections.Counter(b[3] for b in h.buildings)
 print('Nodes in bbox',len(h.n),'elapsed',round(time.time()-h.start,1),'s',flush=True)
 points=BOUNDARY['geojson']['coordinates'][0]
 result={
- 'meta':{'name':'Tuzla, İstanbul','osmRelation':1276010,'osmDate':'2026-10-29','origin':[LAT0,LON0],'projection':'Local Web Mercator, kilometres','buildingCount':len(h.buildings),'roadCount':len(h.roads),'treeCount':len(h.trees),'heightStats':dict(h.counts)},
+ 'meta':{'name':'Tuzla, İstanbul','osmRelation':1276010,'osmDate':'2026-10-29','origin':[LAT0,LON0],'projection':'Local Web Mercator, kilometres','buildingCount':len(h.buildings),'roadCount':len(h.roads),'treeCount':len(h.trees),'heightStats':dict(h.counts),'buildingSchema':'[ring,height,levels,kind,roofColour,wallColour,roofShape?,minH?,holes?]','kindCounts':{str(k):kind_counts[k] for k in range(8)}},
  'boundary':flat(points), 'buildings':h.buildings,'roads':h.roads,'land':h.land,'trees':h.trees,'pois':h.pois
 }
 OUT.write_text(json.dumps(result,ensure_ascii=False,separators=(',',':')),encoding='utf-8')
