@@ -24,32 +24,44 @@ float tzFbm(vec2 p){ float v = 0.0, a = .5; for(int i = 0; i < 4; i++){ v += a *
 // factory, house, bitişik nizam apartment, public block, retail, hangar);
 // the bottom row is the ground floor and the top row an upper floor.
 export const ATLAS_STYLES = 8;
+// Mask channels: r = wall tint weight, g = glass (1 clear pane, .5 curtain/blind),
+// b = micro-relief height (.5 wall plane, < .35 recess/joint, > .65 frame/sill/rib).
 function facadeAtlas() {
-  const S = 256, col = document.createElement('canvas'), msk = document.createElement('canvas');
-  col.width = msk.width = S * ATLAS_STYLES; col.height = msk.height = S * 2;
-  const g = col.getContext('2d'), m = msk.getContext('2d');
-  const WALL = '#ffffff', TINT = 'rgb(255,0,0)', GLASS = 'rgb(0,255,255)', NONE = 'rgb(0,0,0)';
+  const S = 384, col = document.createElement('canvas'), msk = document.createElement('canvas'), rel = document.createElement('canvas');
+  col.width = msk.width = rel.width = S * ATLAS_STYLES; col.height = msk.height = rel.height = S * 2;
+  const g = col.getContext('2d'), m = msk.getContext('2d'), b = rel.getContext('2d');
+  const WALL = '#ffffff', TINT = 'rgb(255,0,0)', GLASS = 'rgb(0,255,0)', NONE = 'rgb(0,0,0)';
+  const H = v => { const k = Math.round(v * 255); return `rgb(${k},${k},${k})`; };
   g.fillStyle = WALL; g.fillRect(0, 0, col.width, col.height);
   m.fillStyle = TINT; m.fillRect(0, 0, msk.width, msk.height);
+  b.fillStyle = H(.5); b.fillRect(0, 0, rel.width, rel.height);
   const rect = (ctx, c, x, y, w, h) => { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); };
-  const both = (cx, cy, x, y, w, h, colour, mask) => { rect(g, colour, cx + x * S, cy + y * S, w * S, h * S); rect(m, mask, cx + x * S, cy + y * S, w * S, h * S); };
+  // default relief: glass sits recessed, untinted trim protrudes, tinted wall stays flat
+  const both = (cx, cy, x, y, w, h, colour, mask, height) => {
+    rect(g, colour, cx + x * S, cy + y * S, w * S, h * S); rect(m, mask, cx + x * S, cy + y * S, w * S, h * S);
+    rect(b, H(height ?? (mask === GLASS ? .3 : mask === NONE ? .7 : .5)), cx + x * S, cy + y * S, w * S, h * S);
+  };
+  const relief = (cx, cy, x, y, w, h, height) => rect(b, H(height), cx + x * S, cy + y * S, w * S, h * S);
   const glass = (cx, cy, x, y, w, h, tone = '#3d5560') => {
     both(cx, cy, x, y, w, h, tone, GLASS);
+    // reveal: the darker recess band just inside the frame
+    relief(cx, cy, x, y, w, .012, .18); relief(cx, cy, x, y, .01, h, .22);
     const grd = g.createLinearGradient(cx + x * S, cy + y * S, cx + (x + w) * S, cy + (y + h) * S);
     grd.addColorStop(0, 'rgba(190,215,225,.35)'); grd.addColorStop(.5, 'rgba(255,255,255,0)'); grd.addColorStop(1, 'rgba(160,190,200,.18)');
     g.fillStyle = grd; g.fillRect(cx + x * S, cy + y * S, w * S, h * S);
   };
-  const noise = (cx, cy, alpha) => { for (let i = 0; i < 900; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * alpha})`; g.fillRect(cx + Math.random() * S, cy + Math.random() * S, 2, 2); } };
+  const noise = (cx, cy, alpha) => { for (let i = 0; i < 2000; i++) { g.fillStyle = `rgba(0,0,0,${Math.random() * alpha})`; g.fillRect(cx + Math.random() * S, cy + Math.random() * S, 2, 2); } };
   for (let s = 0; s < ATLAS_STYLES; s++) for (let row = 0; row < 2; row++) {
     const cx = s * S, cy = row * S, ground = row === 1;
     noise(cx, cy, .05);
     if (s === 0) { // apartment: window with frame, sill and a balcony band
       if (!ground) {
         rect(g, 'rgba(0,0,0,.06)', cx, cy + .9 * S, S, .1 * S); // floor slab line
+        relief(cx, cy, 0, .985, 1, .015, .3);                       // slab groove
         both(cx, cy, .2, .16, .6, .56, '#f4f2ec', NONE);        // frame
         glass(cx, cy, .24, .2, .52, .5);
         both(cx, cy, .495, .2, .01, .5, '#e9e7e0', NONE);         // mullion
-        both(cx, cy, .17, .72, .66, .04, '#d9d6cc', NONE);        // sill
+        both(cx, cy, .17, .72, .66, .04, '#d9d6cc', NONE, .85);   // sill
         both(cx, cy, .1, .76, .8, .03, '#c9c6bd', NONE);          // balcony slab
         for (let i = 0; i <= 12; i++) both(cx, cy, .1 + i * .8 / 12, .62, .008, .14, '#8d8f8c', NONE); // railing
         both(cx, cy, .1, .62, .8, .012, '#8d8f8c', NONE);
@@ -66,12 +78,13 @@ function facadeAtlas() {
       both(cx, cy, .49, .16, .02, .82, '#9aa3a6', NONE);
       if (ground) { glass(cx, cy, .04, .1, .92, .9, '#55707b'); both(cx, cy, .3, .1, .4, .02, '#7f8a8d', NONE); }
     } else if (s === 2) { // industrial cladding with a clerestory strip
-      for (let i = 0; i < 32; i++) both(cx, cy, i / 32, 0, .012, 1, 'rgba(0,0,0,.14)', 'rgb(200,0,0)');
+      for (let i = 0; i < 32; i++) { both(cx, cy, i / 32, 0, .012, 1, 'rgba(0,0,0,.14)', 'rgb(200,0,0)', .25); relief(cx, cy, i / 32 + .016, 0, .01, 1, .75); }
       if (!ground) { glass(cx, cy, .04, .1, .92, .14, '#53656b'); both(cx, cy, 0, .3, 1, .015, 'rgba(0,0,0,.2)', TINT); }
       else { both(cx, cy, .12, .22, .76, .78, '#8f9596', NONE); for (let i = 0; i < 18; i++) both(cx, cy, .12, .24 + i * .042, .76, .008, '#6f7576', NONE); }
     } else if (s === 4) { // 1990s bitişik nizam apartment: mosaic tile cladding, recessed cam balkon
       for (let y = 0; y < 1; y += 1 / 24) for (let x = 0; x < 1; x += 1 / 24) {
         const k = Math.random(); rect(g, `rgba(${k < .5 ? '120,60,40' : '255,250,240'},${.05 + k * .07})`, cx + x * S, cy + y * S, S / 24 - 1, S / 24 - 1);
+        rect(b, H(.44), cx + x * S + S / 24 - 2, cy + y * S, 2, S / 24); rect(b, H(.44), cx + x * S, cy + y * S + S / 24 - 2, S / 24, 2); // grout
       }
       if (!ground) {
         rect(g, 'rgba(0,0,0,.08)', cx, cy + .9 * S, S, .1 * S);
@@ -110,7 +123,7 @@ function facadeAtlas() {
         both(cx, cy, .49, .28, .02, .72, '#8e979a', NONE);
       }
     } else if (s === 7) { // shipyard hangar / logistics: tall steel siding, sliding bay door
-      for (let i = 0; i < 24; i++) both(cx, cy, i / 24, 0, .016, 1, 'rgba(0,0,0,.16)', 'rgb(190,0,0)');
+      for (let i = 0; i < 24; i++) { both(cx, cy, i / 24, 0, .016, 1, 'rgba(0,0,0,.16)', 'rgb(190,0,0)', .22); relief(cx, cy, i / 24 + .02, 0, .016, 1, .78); }
       for (let i = 0; i < 40; i++) rect(g, `rgba(110,70,40,${Math.random() * .08})`, cx + Math.random() * S, cy + Math.random() * S, 3, 10 + Math.random() * 30); // rust streaks
       if (!ground) { glass(cx, cy, 0, .08, 1, .1, '#56676c'); both(cx, cy, 0, .2, 1, .012, 'rgba(0,0,0,.25)', TINT); }
       else {
@@ -130,6 +143,10 @@ function facadeAtlas() {
     }
   }
   const mk = (c, srgb) => { const t = new THREE.CanvasTexture(c); t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 8; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; return t; };
+  // fold the relief canvas into the mask's blue channel
+  const md = m.getImageData(0, 0, msk.width, msk.height), rd = b.getImageData(0, 0, rel.width, rel.height).data;
+  for (let i = 0; i < rd.length; i += 4) md.data[i + 2] = rd[i];
+  m.putImageData(md, 0, 0);
   return { color: mk(col, true), mask: mk(msk, false) };
 }
 
@@ -151,6 +168,7 @@ vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
 export function buildingMaterial() {
   const atlas = facadeAtlas();
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .88, metalness: 0, envMapIntensity: .55 });
+  mat.userData.atlas = atlas; // handy for inspecting the generated textures
   mat.onBeforeCompile = shader => {
     Object.assign(shader.uniforms, { uFacade: { value: atlas.color }, uMask: { value: atlas.mask }, uNight: shared.uNight, uHScale: shared.uHScale, uSelected: shared.uSelected, uTime: shared.uTime });
     shader.vertexShader = shader.vertexShader
@@ -162,11 +180,12 @@ uniform sampler2D uFacade; uniform sampler2D uMask; uniform float uNight; unifor
 varying vec4 vInfo; varying vec2 vFacade; varying vec3 vWPos;
 ${NOISE}`)
       .replace('#include <color_fragment>', /* glsl */`
-float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0;
+float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
 {
   // info.y: style + wallRole * 16 on walls, 100 + roof style on roofs; info.w: floors + seed
-  float id = vInfo.x, floors = floor(vInfo.w), seed = fract(vInfo.w);
-  float style = mod(vInfo.y, 16.0), wallRole = floor(vInfo.y / 16.0), rStyle = vInfo.y - 100.0;
+  // round first: interpolated varyings can land a hair below the packed integer
+  float iy = floor(vInfo.y + .5), id = floor(vInfo.x + .5), floors = floor(vInfo.w), seed = fract(vInfo.w);
+  float style = mod(iy, 16.0), wallRole = floor(iy / 16.0), rStyle = iy - 100.0;
   vec3 tint = pow(vColor, vec3(2.2)); // vertex colours are stored as sRGB bytes
   vec3 albedo;
   if (vInfo.y < 99.5) {
@@ -181,11 +200,14 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0;
       else if (h < (style > 2.5 && !shop ? .35 : .22) * (wallRole < 0.5 ? 1.0 : .5)) row = 0.0;
     }
     // rear and courtyard walls: narrower utility / kitchen windows
-    float cx = wallRole > 1.5 ? clamp(.5 + (cell.x - .5) * 1.6, 0.0, 1.0) : cell.x;
+    float squeeze = wallRole > 1.5 ? 1.6 : 1.0, cx = .5 + (cell.x - .5) * squeeze;
+    bool margin = cx < .015 || cx > .985;
+    cx = clamp(cx, .015, .985);
     vec2 auv = vec2((style + cx) * .125, (row == 0.0 ? 0.0 : .5) + cell.y * .5);
-    vec2 dx = dFdx(vFacade) * vec2(.125, .5), dy = dFdy(vFacade) * vec2(.125, .5);
+    vec2 dx = dFdx(vFacade) * vec2(.125 * squeeze, .5), dy = dFdy(vFacade) * vec2(.125 * squeeze, .5);
     vec3 tex = textureGrad(uFacade, auv, dx, dy).rgb;
     vec3 msk = textureGrad(uMask, auv, dx, dy).rgb;
+    if (margin) { tex = vec3(.97); msk = vec3(1.0, 0.0, .5); } // plain wall beside the narrow window
     if (wallRole > 2.5) {
       // blind party wall (sağır cephe): plain plaster with floor-slab lines, no openings
       float sfw = fwidth(vFacade.y), slab = 1.0 - smoothstep(.025, .025 + sfw * 1.5, abs(fract(vFacade.y + .5) - .5));
@@ -218,7 +240,7 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0;
     albedo *= ao;
     // subtle weathering
     albedo *= .93 + .1 * tzNoise(vec2(vFacade.x * 1.7 + id, vFacade.y * .8));
-    tzGlass = msk.g;
+    tzGlass = msk.g; tzRel = msk.b;
     tzRough = mix(.92, .12, tzGlass);
     // lit windows after dusk
     float lit = step(h, mix(.12, .4, fract(seed * 13.7)) * (fl < .5 ? 1.4 : 1.0));
@@ -260,6 +282,18 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0;
 }
 `)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = tzRough;')
+      .replace('#include <normal_fragment_maps>', /* glsl */`
+#include <normal_fragment_maps>
+{
+  // screen-space bump from the atlas relief channel (frames, sills, ribs, joints), faded with distance
+  float fade = clamp(1.0 - length(fwidth(vFacade)) * 12.0, 0.0, 1.0); // gone once a bay is < ~12 px
+  float hgt = (tzRel - .5) * .00008 * fade;                 // ±4 cm in km
+  vec2 dH = vec2(dFdx(hgt), dFdy(hgt));
+  vec3 sx = dFdx(-vViewPosition), sy = dFdy(-vViewPosition);
+  vec3 r1 = cross(sy, normal), r2 = cross(normal, sx);
+  float det = dot(sx, r1) * faceDirection;
+  if (abs(det) > 1e-20) normal = normalize(abs(det) * normal - sign(det) * (dH.x * r1 + dH.y * r2));
+}`)
       .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += tzGlow;');
   };
   mat.customProgramCacheKey = () => 'tz-building';
