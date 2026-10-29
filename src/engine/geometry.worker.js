@@ -3,6 +3,7 @@
 // Everything is returned as typed arrays (transferred, not copied).
 import earcut from 'earcut';
 import { terrainSampler, hash2, toWorld } from './geo.js';
+import { buildLandmarks } from './landmarks.js';
 
 const post = (msg, transfer) => self.postMessage(msg, transfer || []);
 const progress = (stage, value) => post({ type: 'progress', stage, value });
@@ -444,6 +445,8 @@ function build({ osm, terrain, ground, options }) {
     cyl(mr * .95, 0.00005, g + mh, g + mh + .006, mh + baseRel, mh + .006 + baseRel);
     stats.mosques = (stats.mosques || 0) + 1;
   }
+  // hero landmarks share the chunk buffers; info encoders must match vert() above
+  Object.assign(stats, buildLandmarks({ vert, getChunk, elev, pois: osm.pois, roads: osm.roads, meta, names, rings, firstId: total, wall: s => s, roof: s => 100 + s, iw: packW }));
   progress('buildings', 1);
 
   const chunkOut = [], transfer = [];
