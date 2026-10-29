@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
+    "test": "node scripts/test_repo.mjs",
     "preview": "vite preview --host 0.0.0.0",
     "build:standalone": "vite build && python3 scripts/build_standalone.py"
   },
