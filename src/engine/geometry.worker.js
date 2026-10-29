@@ -49,6 +49,46 @@ function cleanRing(src) {
   return out;
 }
 
+/** Splits an orthogonal 6-corner L plan into two overlapping rectangles (each [[x,z]×4]), or null. */
+function lShapeWings(r) {
+  const n = r.length / 2; if (n !== 6) return null;
+  let best = 0, ux = 1, uz = 0;
+  for (let i = 0; i < n; i++) { const j = (i + 1) % n, ex = r[j * 2] - r[i * 2], ez = r[j * 2 + 1] - r[i * 2 + 1], l = Math.hypot(ex, ez); if (l > best) { best = l; ux = ex / l; uz = ez / l; } }
+  const vx = -uz, vz = ux, ox = r[0], oz = r[1], U = [], V = [];
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n, ex = r[j * 2] - r[i * 2], ez = r[j * 2 + 1] - r[i * 2 + 1], l = Math.hypot(ex, ez) || 1, cs = Math.abs((ex * ux + ez * uz) / l);
+    if (cs > .2 && cs < .97) return null;                       // not orthogonal
+    U.push((r[i * 2] - ox) * ux + (r[i * 2 + 1] - oz) * uz); V.push((r[i * 2] - ox) * vx + (r[i * 2 + 1] - oz) * vz);
+  }
+  const u0 = Math.min(...U), u1 = Math.max(...U), v0 = Math.min(...V), v1 = Math.max(...V), tol = .0006;
+  let k = -1;
+  for (let i = 0; i < n; i++) if (U[i] > u0 + tol && U[i] < u1 - tol && V[i] > v0 + tol && V[i] < v1 - tol) { if (k >= 0) return null; k = i; }
+  if (k < 0) return null;
+  const ru = U[k], rv = V[k], cu = ru - u0 < u1 - ru ? u0 : u1, cv = rv - v0 < v1 - rv ? v0 : v1;
+  const A = [u0, u1, cv === v0 ? rv : v0, cv === v0 ? v1 : rv], B = [cu === u0 ? ru : u0, cu === u0 ? u1 : ru, v0, v1];
+  if (A[3] - A[2] < .003 || B[1] - B[0] < .003) return null;
+  const W = R => [[R[0], R[2]], [R[1], R[2]], [R[1], R[3]], [R[0], R[3]]].map(([a, b]) => [ox + ux * a + vx * b, oz + uz * a + vz * b]);
+  return [W(A), W(B)];
+}
+
+/** Mitred offset of a closed polygon given as [[x,z],...]: d > 0 grows it outward. */
+function offsetPoly(P, d) {
+  const n = P.length; let a = 0;
+  for (let i = 0; i < n; i++) { const j = (i + 1) % n; a += P[i][0] * P[j][1] - P[j][0] * P[i][1]; }
+  const s = a >= 0 ? 1 : -1, out = [];
+  for (let i = 0; i < n; i++) {
+    const p = P[(i + n - 1) % n], q = P[i], r = P[(i + 1) % n];
+    let e1x = q[0] - p[0], e1z = q[1] - p[1], e2x = r[0] - q[0], e2z = r[1] - q[1];
+    const l1 = Math.hypot(e1x, e1z) || 1, l2 = Math.hypot(e2x, e2z) || 1; e1x /= l1; e1z /= l1; e2x /= l2; e2z /= l2;
+    const n1x = s * e1z, n1z = -s * e1x, n2x = s * e2z, n2z = -s * e2x;
+    let mx = n1x + n2x, mz = n1z + n2z; const ml = Math.hypot(mx, mz);
+    if (ml < 1e-6) { mx = n1x; mz = n1z; } else { mx /= ml; mz /= ml; }
+    const k = Math.min(2.5, 1 / Math.max(.4, mx * n1x + mz * n1z));
+    out.push([q[0] + mx * d * k, q[1] + mz * d * k]);
+  }
+  return out;
+}
+
 /** Scanline polygon fill on a byte raster. */
 function fillRing(r, grid, W, H, x0, z0, cell, value, onlyEmpty = false) {
   let minz = Infinity, maxz = -Infinity;
@@ -189,6 +229,27 @@ function build({ osm, terrain, ground, options }) {
     }
   }
 
+  /** Planar quad P[0..3] (each [x,y,z]) facing along n, with uv per corner. rel = height above `base`. */
+  function quadN(c, P, n, UV, colr, bid, iy, base, iw) {
+    const ids = P.map((p, k) => vert(c, p[0], p[1], p[2], n[0], n[1], n[2], UV[k * 2], UV[k * 2 + 1], colr, bid, iy, Math.max(0, p[1] - base), iw));
+    const f = faceNormal(P[0][0], P[0][1], P[0][2], P[1][0], P[1][1], P[1][2], P[2][0], P[2][1], P[2][2]);
+    if (f[0] * n[0] + f[1] * n[1] + f[2] * n[2] >= 0) c.idx.push3(ids[0], ids[1], ids[2]), c.idx.push3(ids[0], ids[2], ids[3]);
+    else c.idx.push3(ids[0], ids[2], ids[1]), c.idx.push3(ids[0], ids[3], ids[2]);
+  }
+  /** Box on an axis (ux, uz): half length hl along u, half depth hd across, from y0 to y1; top and four sides. */
+  function box(c, x, z, ux, uz, hl, hd, y0, y1, colr, bid, iy, base, iw, uvScale = 1000, sides = 15) {
+    const vx = -uz, vz = ux, k = uvScale;
+    const C = [[-hl, -hd], [hl, -hd], [hl, hd], [-hl, hd]].map(([a, b]) => [x + ux * a + vx * b, z + uz * a + vz * b]);
+    const H = (y1 - y0) * k;
+    const N = [[-vx, 0, -vz], [ux, 0, uz], [vx, 0, vz], [-ux, 0, -uz]];
+    for (let s2 = 0; s2 < 4; s2++) {
+      if (!(sides >> s2 & 1)) continue;
+      const a = C[s2], b2 = C[(s2 + 1) % 4], L = Math.hypot(b2[0] - a[0], b2[1] - a[1]) * k;
+      quadN(c, [[a[0], y0, a[1]], [b2[0], y0, b2[1]], [b2[0], y1, b2[1]], [a[0], y1, a[1]]], N[s2], [0, 0, L, 0, L, H, 0, H], colr, bid, iy, base, iw);
+    }
+    quadN(c, C.map(p => [p[0], y1, p[1]]), [0, 1, 0], [0, 0, hl * 2 * k, 0, hl * 2 * k, hd * 2 * k, 0, hd * 2 * k], colr, bid, iy, base, iw);
+  }
+
   const total = osm.buildings.length;
   const stats = { pitched: 0, flat: 0, named: 0, walls: [0, 0, 0, 0], styles: [0, 0, 0, 0, 0, 0, 0, 0], roofs: [0, 0, 0, 0] };
 
@@ -271,6 +332,13 @@ function build({ osm, terrain, ground, options }) {
     else if (rs === 3) roofType = !pitchable ? 0 : quad ? 3 : n <= 10 ? 2 : 0;
     else if (rs === 4) roofType = pitchable && n <= 12 ? 2 : 0;
     else if (rs === 0 && pitchable && style !== 1 && style !== 6 && n <= 10 && area < 1300 && r3 < (style === 3 ? .92 : .78)) roofType = quad ? (style === 3 && r3 < .35 ? 3 : 1) : 2;
+    // L-shaped plans (6 orthogonal corners): two overlapping hipped wings (roofType 4 while building, reported as hipped)
+    let lWings = null;
+    if (roofType === 0 && n === 6 && !convex && !holes && !industrial && area < 900 && (rs === 0 || rs === 2) && style !== 1 && style !== 6 && r3 < .85) {
+      lWings = lShapeWings(ring);
+      if (lWings) roofType = 4;
+    }
+    const PARAPET = .00055, parapet = roofType === 0 && !industrial && !holes && area >= 55 && style !== 2 && style !== 7;
 
     // colours
     stats.styles[style]++;
@@ -297,6 +365,7 @@ function build({ osm, terrain, ground, options }) {
     // walls (each edge spans a whole number of window bays)
     const bay = BAY[style];
     const iw = packW(floors, seed);
+    const topW = top + (parapet ? PARAPET : 0); // flat terraces get a parapet rising above the roof
     const walls = (r, outward, role) => {
       const m = r.length / 2;
       for (let i = 0; i < m; i++) {
@@ -307,11 +376,11 @@ function build({ osm, terrain, ground, options }) {
         const bays = Math.max(1, Math.round(len * 1000 / bay));
         const ga = role === undefined ? gy[i] : elev(ax, az), gb = role === undefined ? gy[j] : elev(bx, bz);
         const ya = floating ? base + minKm : ga - .0012, yb = floating ? base + minKm : gb - .0012;
-        const va = floating ? 0 : (ya - base) * 1000 / floorH, vb = floating ? 0 : (yb - base) * 1000 / floorH, vt = (top - (floating ? ya : base)) * 1000 / floorH;
+        const va = floating ? 0 : (ya - base) * 1000 / floorH, vb = floating ? 0 : (yb - base) * 1000 / floorH, vt = (topW - (floating ? ya : base)) * 1000 / floorH;
         const i0 = vert(c, ax, ya, az, nx, 0, nz, 0, va, wallC, bid, iy, floating ? minKm : 0, iw);
         const i1 = vert(c, bx, yb, bz, nx, 0, nz, bays, vb, wallC, bid, iy, floating ? minKm : 0, iw);
-        const i2 = vert(c, bx, top, bz, nx, 0, nz, bays, vt, wallC, bid, iy, hKm, iw);
-        const i3 = vert(c, ax, top, az, nx, 0, nz, 0, vt, wallC, bid, iy, hKm, iw);
+        const i2 = vert(c, bx, topW, bz, nx, 0, nz, bays, vt, wallC, bid, iy, hKm + topW - top, iw);
+        const i3 = vert(c, ax, topW, az, nx, 0, nz, 0, vt, wallC, bid, iy, hKm + topW - top, iw);
         // outward winding: (A,C,B)(A,D,C) when the right-hand perpendicular is outward
         if (-dz * nx + dx * nz > 0) c.idx.push3(i0, i1, i2), c.idx.push3(i0, i2, i3);
         else c.idx.push3(i0, i2, i1), c.idx.push3(i0, i3, i2);
@@ -321,57 +390,121 @@ function build({ osm, terrain, ground, options }) {
     // courtyard walls face into the hole, i.e. against the hole ring's own outward side
     if (holes) for (const h of holes) walls(h, signedArea(h) < 0, 2);
 
-    // roof
-    // >= 100 tells the shader this is a roof: 110 flat, 111 hipped, 112 pyramid, 113 metal, 114 dome, 115 minaret, 116 gabled
-    const roofStyle = roofType === 3 ? 116 : 110 + roofType;
-    let built = false;
-    if (roofType === 1 || roofType === 3) {
-      // hipped roof over a quadrilateral: ridge along the longer axis
-      const P = [0, 1, 2, 3].map(k => [ring[k * 2], ring[k * 2 + 1]]);
-      const e0 = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]), e1 = Math.hypot(P[2][0] - P[1][0], P[2][1] - P[1][1]);
-      let Q = e0 >= e1 ? P : [P[1], P[2], P[3], P[0]];
-      const L = Math.max(e0, e1), Wd = Math.min(e0, e1);
-      if (Wd > 0.003) {
-        const ux = ((Q[1][0] - Q[0][0]) + (Q[2][0] - Q[3][0])) / 2, uz = ((Q[1][1] - Q[0][1]) + (Q[2][1] - Q[3][1])) / 2, ul = Math.hypot(ux, uz);
-        const gable = roofType === 3, dxu = ux / ul, dzu = uz / ul, half = gable ? L / 2 : Math.max(0, (L - Wd) / 2);
-        const rh = Math.min(gable ? 4.2 : 3.6, Math.max(1.3, Wd * 1000 * (gable ? .32 : .26))) / 1000;
-        const ry = top + rh, rrel = hKm + rh;
-        // gabled ridge ends sit exactly on the midpoints of the short edges so the gable walls stay vertical
-        const R1 = gable ? [(Q[3][0] + Q[0][0]) / 2, ry, (Q[3][1] + Q[0][1]) / 2, rrel] : [cx - dxu * half, ry, cz - dzu * half, rrel];
-        const R2 = gable ? [(Q[1][0] + Q[2][0]) / 2, ry, (Q[1][1] + Q[2][1]) / 2, rrel] : [cx + dxu * half, ry, cz + dzu * half, rrel];
-        const T = q => [q[0], top, q[1], hKm];
-        const eaveOf = (a, b) => { const ex = b[0] - a[0], ez = b[1] - a[1], l = Math.hypot(ex, ez) || 1; return [a[0], a[1], ex / l, ez / l]; };
-        const quad = (a, bq, r2, r1) => { const ev = eaveOf(a, bq); roofTri(c, [...T(a), ...T(bq), ...r2], roofC, bid, roofStyle, iw, ev); roofTri(c, [...T(a), ...r2, ...r1], roofC, bid, roofStyle, iw, ev); };
-        quad(Q[0], Q[1], R2, R1);
-        quad(Q[2], Q[3], R1, R2);
-        if (gable) {
-          // vertical triangular gable end walls in the wall colour (plain plaster)
-          const gableWall = (a, bq, r) => {
-            const ex = bq[0] - a[0], ez = bq[1] - a[1], l = Math.hypot(ex, ez) || 1;
-            let nx = ez / l, nz = -ex / l;
-            if (((a[0] + bq[0]) / 2 - cx) * nx + ((a[1] + bq[1]) / 2 - cz) * nz < 0) { nx = -nx; nz = -nz; }
-            const iy = style + 48, vt = hKm * 1000 / floorH, bays = Math.max(1, Math.round(l * 1000 / bay));
-            const i0 = vert(c, a[0], top, a[1], nx, 0, nz, 0, vt, wallC, bid, iy, hKm, iw);
-            const i1 = vert(c, bq[0], top, bq[1], nx, 0, nz, bays, vt, wallC, bid, iy, hKm, iw);
-            const i2 = vert(c, r[0], r[1], r[2], nx, 0, nz, bays / 2, vt + rh * 1000 / floorH, wallC, bid, iy, r[3], iw);
-            if (-ez * nx + ex * nz > 0) c.idx.push3(i0, i1, i2); else c.idx.push3(i0, i2, i1);
-          };
-          gableWall(Q[1], Q[2], R2); gableWall(Q[3], Q[0], R1);
-        } else {
-          roofTri(c, [...T(Q[1]), ...T(Q[2]), ...R2], roofC, bid, roofStyle, iw, eaveOf(Q[1], Q[2]));
-          roofTri(c, [...T(Q[3]), ...T(Q[0]), ...R1], roofC, bid, roofStyle, iw, eaveOf(Q[3], Q[0]));
-        }
-        built = true; stats.pitched++;
-      }
-    } else if (roofType === 2) {
-      const rh = Math.min(3.4, Math.max(1.2, Math.sqrt(area) * .22)) / 1000;
-      const apex = [cx, top + rh, cz, hKm + rh];
+    // 3D balcony stacks (wallRole 4 in info.y) on street fronts and long side walls of apartments:
+    // one box per stack from the first floor slab to just under the roof, never on blind party walls
+    if ((style === 0 || style === 4) && floors >= 2 && area >= 75 && !floating) {
+      const D = .0011, y0 = base + floorH / 1000 - .00015, y1 = top - .0004, glazed = style === 4 || r3 > .7;
+      const biy = (glazed ? 4 : 0) + 64;
+      // the two longest street fronts and the longest long side wall carry balconies
+      const cand = [];
       for (let i = 0; i < n; i++) {
-        const j = (i + 1) % n, a = [ring[i * 2], ring[i * 2 + 1]], bq = [ring[j * 2], ring[j * 2 + 1]];
-        const ex = bq[0] - a[0], ez = bq[1] - a[1], l = Math.hypot(ex, ez); if (l < 1e-5) continue;
-        roofTri(c, [a[0], top, a[1], hKm, bq[0], top, bq[1], hKm, ...apex], roofC, bid, roofStyle, iw, [a[0], a[1], ex / l, ez / l]);
+        const j = (i + 1) % n, len = Math.hypot(ring[j * 2] - ring[i * 2], ring[j * 2 + 1] - ring[i * 2 + 1]);
+        if ((roles[i] === 0 && len >= .006) || (roles[i] === 1 && len >= .009)) cand.push([roles[i], len, i]);
       }
+      cand.sort((a, b2) => a[0] - b2[0] || b2[1] - a[1]);
+      const pickE = cand.filter(e => e[0] === 0).slice(0, 2).concat(cand.filter(e => e[0] === 1).slice(0, 1));
+      for (const [, , i] of pickE) {
+        const j = (i + 1) % n, ax = ring[i * 2], az = ring[i * 2 + 1], ex = ring[j * 2] - ax, ez = ring[j * 2 + 1] - az, len = Math.hypot(ex, ez);
+        const bays = Math.max(1, Math.round(len * 1000 / bay)); if (bays < 2) continue;
+        const nx = (positive ? ez : -ez) / len, nz = (positive ? -ex : ex) / len, tx = ex / len, tz = ez / len;
+        const w = bays >= 6 ? 1.6 : 1.2, starts = bays >= 5 ? [bays * .25 - w / 2, bays * .75 - w / 2] : [(bays - w) / 2];
+        for (const u0 of starts) {
+          const t0 = u0 / bays * len, t1 = (u0 + w) / bays * len;
+          const A = [ax + tx * t0, az + tz * t0], B = [ax + tx * t1, az + tz * t1];
+          const A2 = [A[0] + nx * D, A[1] + nz * D], B2 = [B[0] + nx * D, B[1] + nz * D];
+          const v0 = (y0 - base) * 1000 / floorH, v1 = (y1 - base) * 1000 / floorH, dU = D * 1000 / bay;
+          quadN(c, [[A2[0], y0, A2[1]], [B2[0], y0, B2[1]], [B2[0], y1, B2[1]], [A2[0], y1, A2[1]]], [nx, 0, nz], [0, v0, w, v0, w, v1, 0, v1], wallC, bid, biy, base, iw);
+          quadN(c, [[A[0], y0, A[1]], [A2[0], y0, A2[1]], [A2[0], y1, A2[1]], [A[0], y1, A[1]]], [-tx, 0, -tz], [0, v0, dU, v0, dU, v1, 0, v1], wallC, bid, biy, base, iw);
+          quadN(c, [[B2[0], y0, B2[1]], [B[0], y0, B[1]], [B[0], y1, B[1]], [B2[0], y1, B2[1]]], [tx, 0, tz], [0, v0, dU, v0, dU, v1, 0, v1], wallC, bid, biy, base, iw);
+          quadN(c, [[A[0], y0, A[1]], [B[0], y0, B[1]], [B2[0], y0, B2[1]], [A2[0], y0, A2[1]]], [0, -1, 0], [0, 0, w, 0, w, dU, 0, dU], wallC, bid, biy, base, iw);
+          quadN(c, [[A[0], y1, A[1]], [B[0], y1, B[1]], [B2[0], y1, B2[1]], [A2[0], y1, A2[1]]], [0, 1, 0], [0, 0, w, 0, w, dU, 0, dU], wallC, bid, biy, base, iw);
+          stats.balconies = (stats.balconies || 0) + 1;
+        }
+      }
+    }
+
+    // roof
+    // >= 100 tells the shader this is a roof: 110 flat, 111 hipped, 112 pyramid, 113 metal, 114 dome, 115 minaret,
+    // 116 gabled, 117 eave soffit / fascia, 118 parapet coping
+    const roofStyle = roofType === 3 ? 116 : 110 + roofType;
+    const EAVE = .0004, FASCIA = .00012;
+    const T = (q, y = top, rel = hKm) => [q[0], y, q[1], rel];
+    const eaveOf = (a, b2) => { const ex = b2[0] - a[0], ez = b2[1] - a[1], l = Math.hypot(ex, ez) || 1; return [a[0], a[1], ex / l, ez / l]; };
+    /** Sloped underside from the wall top P to the eave rim E (dropped by `drop`), plus a thin fascia on the rim. */
+    const eaves = (P, E, drop) => {
+      const m = P.length, ye = top - drop, yf = ye - FASCIA;
+      let pcx = 0, pcz = 0; for (const q of P) { pcx += q[0] / m; pcz += q[1] / m; }
+      for (let k = 0; k < m; k++) {
+        const k2 = (k + 1) % m, ex = E[k2][0] - E[k][0], ez = E[k2][1] - E[k][1], l = Math.hypot(ex, ez); if (l < 1e-6) continue;
+        let nx = ez / l, nz = -ex / l;
+        if (((E[k][0] + E[k2][0]) / 2 - pcx) * nx + ((E[k][1] + E[k2][1]) / 2 - pcz) * nz < 0) { nx = -nx; nz = -nz; }
+        const L = l * 1000;
+        quadN(c, [[E[k][0], yf, E[k][1]], [E[k2][0], yf, E[k2][1]], [E[k2][0], ye, E[k2][1]], [E[k][0], ye, E[k][1]]], [nx, 0, nz], [0, 0, L, 0, L, .12, 0, .12], roofC, bid, 117, base, iw);
+        quadN(c, [[P[k][0], top, P[k][1]], [P[k2][0], top, P[k2][1]], [E[k2][0], yf, E[k2][1]], [E[k][0], yf, E[k][1]]], [0, -1, 0], [0, 0, L, 0, L, .4, 0, .4], wallC, bid, 117, base, iw);
+      }
+    };
+    /** Hipped (or gabled) roof over a convex quadrilateral with a saçak overhang. */
+    const hipQuad = (P, gable, rs) => {
+      const e0 = Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]), e1 = Math.hypot(P[2][0] - P[1][0], P[2][1] - P[1][1]);
+      const Q = e0 >= e1 ? P : [P[1], P[2], P[3], P[0]];
+      const L = Math.max(e0, e1), Wd = Math.min(e0, e1);
+      if (Wd <= .003) return false;
+      let qx = 0, qz = 0; for (const q of Q) { qx += q[0] / 4; qz += q[1] / 4; }
+      const ux = ((Q[1][0] - Q[0][0]) + (Q[2][0] - Q[3][0])) / 2, uz = ((Q[1][1] - Q[0][1]) + (Q[2][1] - Q[3][1])) / 2, ul = Math.hypot(ux, uz);
+      const dxu = ux / ul, dzu = uz / ul, half = gable ? L / 2 : Math.max(0, (L - Wd) / 2);
+      const rh = Math.min(gable ? 4.2 : 3.6, Math.max(1.3, Wd * 1000 * (gable ? .32 : .26))) / 1000;
+      const ry = top + rh, rrel = hKm + rh, drop = EAVE * rh / (Wd / 2); ridgeH = Math.max(ridgeH, rh);
+      // gabled ridge ends sit exactly over the short-edge midpoints so the gable walls stay vertical; the roof runs on past them
+      const R1 = gable ? [(Q[3][0] + Q[0][0]) / 2, ry, (Q[3][1] + Q[0][1]) / 2, rrel] : [qx - dxu * half, ry, qz - dzu * half, rrel];
+      const R2 = gable ? [(Q[1][0] + Q[2][0]) / 2, ry, (Q[1][1] + Q[2][1]) / 2, rrel] : [qx + dxu * half, ry, qz + dzu * half, rrel];
+      const E = offsetPoly(Q, EAVE), ye = top - drop, re = hKm - drop;
+      const R1e = gable ? [R1[0] - dxu * EAVE, ry, R1[2] - dzu * EAVE, rrel] : R1, R2e = gable ? [R2[0] + dxu * EAVE, ry, R2[2] + dzu * EAVE, rrel] : R2;
+      const face = (a, b2, r2, r1) => { const ev = eaveOf(a, b2); roofTri(c, [...T(a, ye, re), ...T(b2, ye, re), ...r2], roofC, bid, rs, iw, ev); roofTri(c, [...T(a, ye, re), ...r2, ...r1], roofC, bid, rs, iw, ev); };
+      face(E[0], E[1], R2e, R1e);
+      face(E[2], E[3], R1e, R2e);
+      if (gable) {
+        // vertical triangular gable end walls in the wall colour (plain plaster), and the barge overhang under the roof
+        const gableWall = (a, b2, r) => {
+          const ex = b2[0] - a[0], ez = b2[1] - a[1], l = Math.hypot(ex, ez) || 1;
+          let nx = ez / l, nz = -ex / l;
+          if (((a[0] + b2[0]) / 2 - qx) * nx + ((a[1] + b2[1]) / 2 - qz) * nz < 0) { nx = -nx; nz = -nz; }
+          const iy = style + 48, vt = hKm * 1000 / floorH, bays = Math.max(1, Math.round(l * 1000 / bay));
+          const i0 = vert(c, a[0], top, a[1], nx, 0, nz, 0, vt, wallC, bid, iy, hKm, iw);
+          const i1 = vert(c, b2[0], top, b2[1], nx, 0, nz, bays, vt, wallC, bid, iy, hKm, iw);
+          const i2 = vert(c, r[0], r[1], r[2], nx, 0, nz, bays / 2, vt + rh * 1000 / floorH, wallC, bid, iy, r[3], iw);
+          if (-ez * nx + ex * nz > 0) c.idx.push3(i0, i1, i2); else c.idx.push3(i0, i2, i1);
+        };
+        gableWall(Q[1], Q[2], R2); gableWall(Q[3], Q[0], R1);
+        // barge boards: the underside of the overhang beyond each gable
+        roofTri(c, [...T(E[1], ye - FASCIA, re), ...T(E[2], ye - FASCIA, re), ...R2e.map((v, k) => k === 1 ? v - FASCIA : v)], roofC, bid, 117, iw, null);
+        roofTri(c, [...T(E[3], ye - FASCIA, re), ...T(E[0], ye - FASCIA, re), ...R1e.map((v, k) => k === 1 ? v - FASCIA : v)], roofC, bid, 117, iw, null);
+      } else {
+        roofTri(c, [...T(E[1], ye, re), ...T(E[2], ye, re), ...R2], roofC, bid, rs, iw, eaveOf(E[1], E[2]));
+        roofTri(c, [...T(E[3], ye, re), ...T(E[0], ye, re), ...R1], roofC, bid, rs, iw, eaveOf(E[3], E[0]));
+      }
+      eaves(Q, E, drop);
+      return true;
+    };
+    let built = false, ridgeH = 0;
+    if (roofType === 1 || roofType === 3) {
+      built = hipQuad([0, 1, 2, 3].map(k => [ring[k * 2], ring[k * 2 + 1]]), roofType === 3, roofStyle);
+      if (built) stats.pitched++;
+    } else if (roofType === 2) {
+      const rh = Math.min(3.4, Math.max(1.2, Math.sqrt(area) * .22)) / 1000; ridgeH = rh;
+      const apex = [cx, top + rh, cz, hKm + rh];
+      const P = []; for (let i = 0; i < n; i++) P.push([ring[i * 2], ring[i * 2 + 1]]);
+      const E = offsetPoly(P, EAVE), drop = EAVE * rh / (Math.sqrt(area) / 2000);
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n, a = E[i], b2 = E[j];
+        const ex = b2[0] - a[0], ez = b2[1] - a[1], l = Math.hypot(ex, ez); if (l < 1e-5) continue;
+        roofTri(c, [a[0], top - drop, a[1], hKm - drop, b2[0], top - drop, b2[1], hKm - drop, ...apex], roofC, bid, roofStyle, iw, [a[0], a[1], ex / l, ez / l]);
+      }
+      eaves(P, E, drop);
       built = true; stats.pitched++;
+    } else if (roofType === 4) {
+      // L-shaped plan: two overlapping hipped wings whose union forms the valleys
+      for (const W of lWings) hipQuad(W, false, 111);
+      roofType = 1; built = true; stats.pitched++; stats.lWings = (stats.lWings || 0) + 1;
     }
     if (!built) {
       roofType = 0;
@@ -382,9 +515,78 @@ function build({ osm, terrain, ground, options }) {
         const a = tri[t] * 2, bq = tri[t + 1] * 2, cc = tri[t + 2] * 2;
         roofTri(c, [flat[a], top, flat[a + 1], hKm, flat[bq], top, flat[bq + 1], hKm, flat[cc], top, flat[cc + 1], hKm], roofC, bid, industrial ? 113 : 110, iw, null);
       }
+      if (parapet) {
+        // perimeter parapet: coping on top and an inner face dropping back to the terrace
+        const P = []; for (let i = 0; i < n; i++) P.push([ring[i * 2], ring[i * 2 + 1]]);
+        const I = offsetPoly(P, -.0002), yt = top + PARAPET;
+        for (let k = 0; k < n; k++) {
+          const k2 = (k + 1) % n, L = Math.hypot(P[k2][0] - P[k][0], P[k2][1] - P[k][1]) * 1000; if (L < .2) continue;
+          quadN(c, [[P[k][0], yt, P[k][1]], [P[k2][0], yt, P[k2][1]], [I[k2][0], yt, I[k2][1]], [I[k][0], yt, I[k][1]]], [0, 1, 0], [0, 0, L, 0, L, .2, 0, .2], wallC, bid, 118, base, iw);
+          const ex = I[k2][0] - I[k][0], ez = I[k2][1] - I[k][1], l = Math.hypot(ex, ez) || 1;
+          let nx = -ez / l * (positive ? 1 : -1), nz = ex / l * (positive ? 1 : -1);
+          quadN(c, [[I[k][0], top, I[k][1]], [I[k2][0], top, I[k2][1]], [I[k2][0], yt, I[k2][1]], [I[k][0], yt, I[k][1]]], [nx, 0, nz], [0, 0, L, 0, L, .55, 0, .55], wallC, bid, 118, base, iw);
+        }
+        stats.parapets = (stats.parapets || 0) + 1;
+      }
       stats.flat++;
     }
 
+    // rooftop micro-architecture: 119 penthouse, 120 solar collector, 121 metal (tanks, HVAC), 122 skylight, 123 brick chimney
+    {
+      let ax = 1, az = 0, best = 0;
+      for (let i = 0; i < n; i++) { const j = (i + 1) % n, ex = ring[j * 2] - ring[i * 2], ez = ring[j * 2 + 1] - ring[i * 2 + 1], l = Math.hypot(ex, ez); if (l > best) { best = l; ax = ex / l; az = ez / l; } }
+      const inside = (x, z) => pointInRing(x, z, ring);
+      const roofY = top;
+      if (roofType === 0 && inside(cx, cz)) {
+        if (floors >= 4 && area >= 120 && style !== 2 && style !== 7) {
+          box(c, cx, cz, ax, az, .0014, .0014, roofY, roofY + .0024, wallC, bid, 119, base, iw);           // elevator machine room
+          stats.penthouses = (stats.penthouses || 0) + 1;
+        }
+        if ((style === 0 || style === 3 || style === 4) && floors <= 6 && r2 < .55) {
+          // günısı: south-facing tilted collector with a white hot-water cylinder along its top edge
+          const units = area > 220 ? 3 : area > 110 ? 2 : 1;
+          for (let u = 0; u < units; u++) {
+            const px = cx + (u - (units - 1) / 2) * .0024 + .0032 * hash2(bid, u), pz = cz + .0035;
+            if (!inside(px, pz) || !inside(px - .0011, pz + .0006) || !inside(px + .0011, pz + .0006)) continue;
+            const y0 = roofY + .0002, y1 = y0 + .0011, zf = pz + .0005, zb = pz - .0004;
+            const P = [[px - .001, y0, zf], [px + .001, y0, zf], [px + .001, y1, zb], [px - .001, y1, zb]];
+            quadN(c, P, [0, .77, .64], [0, 0, 2, 0, 2, 1.4, 0, 1.4], wallC, bid, 120, base, iw);
+            quadN(c, [P[1], P[0], P[3], P[2]], [0, -.77, -.64], [0, 0, 2, 0, 2, 1.4, 0, 1.4], wallC, bid, 121, base, iw);
+            // cylinder: 8 sides along x
+            const tr = .00025, ty = y1 + tr * .8, tz = zb - .0001, SEG = 8, b0 = c.v;
+            for (let k = 0; k <= SEG; k++) {
+              const th = k / SEG * Math.PI * 2, ny = Math.cos(th), nz2 = Math.sin(th);
+              vert(c, px - .0009, ty + ny * tr, tz + nz2 * tr, 0, ny, nz2, 0, k, wallC, bid, 121, ty - base, iw);
+              vert(c, px + .0009, ty + ny * tr, tz + nz2 * tr, 0, ny, nz2, 1.8, k, wallC, bid, 121, ty - base, iw);
+            }
+            for (let k = 0; k < SEG; k++) { const a = b0 + k * 2; c.idx.push3(a, a + 2, a + 1); c.idx.push3(a + 1, a + 2, a + 3); }
+            stats.solar = (stats.solar || 0) + 1;
+          }
+        }
+        if ((style === 2 || style === 6 || style === 7) && area > 450) {
+          const span = Math.sqrt(area) / 1000;
+          if (r3 < .5 || style === 6) {
+            const units = area > 2500 ? 3 : area > 1000 ? 2 : 1;
+            for (let u = 0; u < units; u++) {
+              const t = (u - (units - 1) / 2) * span * .28, px = cx + ax * t, pz = cz + az * t;
+              if (inside(px, pz)) box(c, px, pz, ax, az, .0015, .001, roofY, roofY + .0016, wallC, bid, 121, base, iw); // HVAC chiller
+            }
+          } else {
+            // linear roof monitor / skylight strips along the hall
+            for (const off of [-.25, .25]) {
+              const px = cx - az * span * off, pz = cz + ax * span * off;
+              if (inside(px, pz)) box(c, px, pz, ax, az, span * .32, .001, roofY, roofY + .0008, wallC, bid, 122, base, iw);
+            }
+          }
+          stats.hvac = (stats.hvac || 0) + 1;
+        }
+      } else if (roofType > 0 && area >= 65 && ridgeH > 0) {
+        // brick chimney rising 0.9 m above the middle of a roof slope
+        const i = Math.floor(r2 * n) % n, j = (i + 1) % n, mx = (ring[i * 2] + ring[j * 2]) / 2, mz = (ring[i * 2 + 1] + ring[j * 2 + 1]) / 2;
+        const px = cx + (mx - cx) * .45, pz = cz + (mz - cz) * .45;
+        if (inside(px, pz)) { box(c, px, pz, ax, az, .000275, .000275, top, top + ridgeH * .55 + .0009, wallC, bid, 123, base, iw); stats.chimneys = (stats.chimneys || 0) + 1; }
+      }
+    }
     stats.roofs[roofType]++;
     // occupancy for tree placement
     fillRing(ring, occ, OW, OH, bx0, bz0, OC, 1);

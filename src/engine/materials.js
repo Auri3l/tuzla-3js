@@ -237,7 +237,7 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
       else if (h < (style > 2.5 && !shop ? .35 : .22) * (wallRole < 0.5 ? 1.0 : .5)) row = 0.0;
     }
     // rear and courtyard walls: narrower utility / kitchen windows
-    float squeeze = wallRole > 1.5 ? 1.6 : 1.0, cx = .5 + (cell.x - .5) * squeeze;
+    float squeeze = wallRole > 1.5 && wallRole < 2.5 ? 1.6 : 1.0, cx = .5 + (cell.x - .5) * squeeze;
     bool margin = cx < .015 || cx > .985;
     cx = clamp(cx, .015, .985);
     vec2 auv = vec2((style + cx) * .125, (row == 0.0 ? 0.0 : .5) + cell.y * .5);
@@ -245,7 +245,25 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
     vec3 tex = textureGrad(uFacade, auv, dx, dy).rgb;
     vec3 msk = textureGrad(uMask, auv, dx, dy).rgb;
     if (margin) { tex = vec3(.97); msk = vec3(1.0, 0.0, .5); } // plain wall beside the narrow window
-    if (wallRole > 2.5) {
+    if (wallRole > 3.5) {
+      // 3D balcony stack: slab edge, parapet or railing, then the open recess or cam balkon glazing per floor
+      float cy = fract(vFacade.y);
+      if (abs(vWNorm.y) > .5) { tex = vec3(.82); msk = vec3(.3, 0.0, .5); }                       // slab soffit / top
+      else if (cy < .07) { tex = vec3(.88); msk = vec3(.15, 0.0, .78); }                          // slab edge
+      else if (cy < .38) {
+        if (style > 3.5 || seed > .55) { tex = vec3(.96); msk = vec3(1.0, 0.0, .55); }            // solid parapet
+        else {
+          float bar = step(.72, fract(vFacade.x * 14.0)) + step(.33, cy);
+          tex = mix(vec3(.13, .13, .14), vec3(.36, .37, .38), clamp(bar, 0.0, 1.0)); msk = vec3(0.0, 0.0, bar > .5 ? .75 : .3); // railing, dark gap
+        }
+      } else if (style > 3.5) {
+        float fr = clamp(step(.93, fract(vFacade.x * 3.0)) + step(.95, cy), 0.0, 1.0);          // folding cam balkon panes
+        tex = mix(vec3(.3, .4, .45), vec3(.86), fr); msk = vec3(0.0, 1.0 - fr, fr > .5 ? .72 : .3);
+      } else { tex = vec3(.2, .19, .18); msk = vec3(0.0, 0.0, .3); }                              // shaded open recess
+    } else if (vFacade.y > floors + .02 && wallRole < 3.5) {
+      // attic band and parapet above the last floor: plain plaster with a coping line at the very top
+      tex = vec3(.94); msk = vec3(1.0, 0.0, .5);
+    } else if (wallRole > 2.5) {
       // blind party wall (sağır cephe): plain plaster with floor-slab lines, no openings
       float sfw = fwidth(vFacade.y), slab = 1.0 - smoothstep(.025, .025 + sfw * 1.5, abs(fract(vFacade.y + .5) - .5));
       tex = vec3(.9) * (1.0 - .08 * slab * clamp(1.0 - sfw * 2.0, 0.0, 1.0));
@@ -336,9 +354,25 @@ float tzRough = .9; vec3 tzGlow = vec3(0.0); float tzGlass = 0.0, tzRel = .5;
   } else {
     // roofs
     vec2 p = vFacade; style = rStyle;
-    if (style > 13.5 && style < 14.5) { albedo = tint * (.8 + .2 * vFacade.y / 6.0); tzRough = .45; }       // dome
+    if (style > 18.5) {
+      // rooftop micro-architecture (uv in metres)
+      if (style < 19.5) { albedo = tint * .92 * (.9 + .12 * tzNoise(p * 1.3 + id)); tzRough = .9; }                       // machine room
+      else if (style < 20.5) {                                                                                          // solar collector
+        float g = max(step(.9, fract(p.x * 2.5)), step(.92, fract(p.y * 1.2)));
+        albedo = mix(vec3(.05, .08, .16), vec3(.55, .57, .6), g * clamp(1.0 - fwidth(p.x) * 3.0, 0.0, 1.0)); tzRough = .22;
+      } else if (style < 21.5) { albedo = vec3(.8, .81, .8) * (.9 + .1 * tzNoise(p * 4.0)); tzRough = .4; }               // tank / HVAC
+      else if (style < 22.5) { albedo = vec3(.2, .27, .3); tzRough = .12; }                                              // skylight glazing
+      else {                                                                                                            // brick chimney
+        float course = floor(p.y / .075), j = fract(p.x / .22 + .5 * mod(course, 2.0));
+        float mortar = max(step(.88, fract(p.y / .075)), step(.92, j)) * clamp(1.0 - fwidth(p.y) * 8.0, 0.0, 1.0);
+        albedo = mix(vec3(.45, .2, .14) * (.85 + .3 * tzHash(vec2(floor(p.x / .22), course))), vec3(.7, .67, .6), mortar);
+        tzRough = .9;
+      }
+    } else if (style > 16.5 && style < 17.5) { albedo = tint * .62 * (.9 + .1 * tzNoise(p * 2.0)); tzRough = .9; }          // eave soffit / fascia, in shade
+    else if (style > 17.5 && style < 18.5) { albedo = mix(tint, vec3(.8, .79, .76), .6) * (.88 + .14 * tzNoise(p * 3.0 + id)); tzRough = .92; } // parapet coping
+    else if (style > 13.5 && style < 14.5) { albedo = tint * (.8 + .2 * vFacade.y / 6.0); tzRough = .45; }       // dome
     else if (style > 14.5 && style < 15.5) { albedo = tint * (.9 + .1 * step(.5, fract(vFacade.y * 6.0))); tzRough = .7; } // minaret
-    else if ((style > 10.5 && style < 12.5) || style > 15.5) {
+    else if ((style > 10.5 && style < 12.5) || (style > 15.5 && style < 16.5)) {
       // clay tiles: rows along the slope with staggered joints
       float rowi = floor(p.y / .34);
       float rr = fract(p.y / .34), cc = fract(p.x / .26 + .5 * mod(rowi, 2.0));
