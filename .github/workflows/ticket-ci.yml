@@ -56,6 +56,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Run Architecture, Worker & Shader Invariant Tests
+        run: npm test
+
       - name: Verify Vite Production Build
         run: npm run build
 
