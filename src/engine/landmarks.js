@@ -279,12 +279,119 @@ function shipyards(ctx, nextId) {
   return n;
 }
 
+/* ------------------------------------------------------ 6.2 Viaport Marina */
+// Positions read off the OSM coastline (which traces every jetty) and the
+// Sentinel-2 mosaic: the west basin inside the hook-shaped retail quarter and
+// the east basin with the U-shaped jetties.
+const MARINA = {
+  // main floating pontoons [x0, z0, x1, z1]; finger berths are added along both sides
+  pontoons: [
+    [-2.672, 8.140, -2.600, 8.140], [-2.671, 8.190, -2.598, 8.190], [-2.670, 8.240, -2.598, 8.240], [-2.668, 8.290, -2.600, 8.290], [-2.662, 8.340, -2.605, 8.340],
+    [-2.526, 8.160, -2.568, 8.160], [-2.524, 8.210, -2.568, 8.210], [-2.522, 8.260, -2.566, 8.260],
+    [-2.990, 8.330, -2.905, 8.330], [-2.993, 8.380, -2.900, 8.380], [-2.995, 8.430, -2.895, 8.430], [-2.993, 8.480, -2.900, 8.480],
+    [-2.860, 8.275, -2.815, 8.300], [-2.818, 8.330, -2.780, 8.355], [-2.775, 8.385, -2.742, 8.405]
+  ],
+  lighthouses: [[-2.697, 8.566], [-2.476, 8.397], [-2.469, 8.474]],
+  pavilions: [[-2.588, 8.467], [-2.562, 8.466], [-2.537, 8.464]],
+  wheel: [-2.503, 8.470],
+  dome: [-2.900, 8.060]
+};
+const TIMBER = hex('#9a7b5a'), TIMBER_DARK = hex('#5e4632'), PONTOON = hex('#b9b3a6');
+
+function pontoon(P, x0, z0, x1, z1) {
+  const dx = x1 - x0, dz = z1 - z0, L = Math.hypot(dx, dz), ux = dx / L, uz = dz / L, vx = -uz, vz = ux;
+  const y0 = .1 * M, y1 = .6 * M;
+  P.box((x0 + x1) / 2, (z0 + z1) / 2, y0, y1, L / 2, 1.4 * M, ux, uz, PONTOON);
+  const step = 6.5 * M, fl = 10 * M;
+  for (let s = 4 * M; s < L - 2 * M; s += step) for (const side of [-1, 1]) {
+    const cx = x0 + ux * s + vx * side * (1.4 * M + fl / 2), cz = z0 + uz * s + vz * side * (1.4 * M + fl / 2);
+    P.box(cx, cz, y0, y1 - .05 * M, fl / 2, .5 * M, vx, vz, TIMBER);
+    // mooring pile at the finger tip
+    P.cyl(cx + vx * side * fl / 2, cz + vz * side * fl / 2, -1 * M, 2 * M, .18 * M, .18 * M, 6, DARK);
+  }
+}
+
+function lighthouse(P, x, z, g) {
+  const y = Math.max(0, g);
+  P.cyl(x, z, y - 1 * M, y + 1.5 * M, 2.6 * M, 2.4 * M, 10, CONCRETE);
+  const H = 11 * M, N = 6;
+  for (let k = 0; k < N; k++) {
+    const a = k / N, b = (k + 1) / N;
+    P.cyl(x, z, y + 1.5 * M + H * a, y + 1.5 * M + H * b, 1.6 * M - .5 * M * a, 1.6 * M - .5 * M * b, 10, k % 2 ? WHITE : RED);
+  }
+  const top = y + 1.5 * M + H;
+  P.cyl(x, z, top, top + .35 * M, 1.8 * M, 1.8 * M, 10, DARK);
+  P.cyl(x, z, top + .35 * M, top + 2.1 * M, .8 * M, .8 * M, 8, hex('#f6efc6'));
+  P.cyl(x, z, top + 2.1 * M, top + 3.2 * M, 1 * M, 0, 8, RED);
+}
+
+function pavilion(P, x, z, g, r) {
+  const y = Math.max(0, g) + .2 * M, ux = 1, uz = 0;
+  P.box(x, z, y - .6 * M, y + .3 * M, 9 * M, 6 * M, ux, uz, CONCRETE);
+  P.box(x, z + 1 * M, y + .3 * M, y + 4.6 * M, 6 * M, 3.5 * M, ux, uz, r < .5 ? TIMBER : hex('#c9b293'), P.PLAIN, { wall: { style: 1, bay: 2.4, floorH: 4.3 } });
+  // overhanging timber roof plate
+  P.box(x, z - .5 * M, y + 4.6 * M, y + 5.1 * M, 7.2 * M, 5.5 * M, ux, uz, TIMBER_DARK);
+  // pergola over the waterfront terrace (towards the basin, -z)
+  const tz0 = z - 3 * M, tz1 = z - 9 * M;
+  for (const sx of [-5.5, 0, 5.5]) P.beam([x + sx * M, y + .3 * M, tz1], [x + sx * M, y + 3.6 * M, tz1], .3 * M, TIMBER_DARK);
+  P.beam([x - 6 * M, y + 3.6 * M, tz1], [x + 6 * M, y + 3.6 * M, tz1], .3 * M, TIMBER_DARK);
+  for (let k = 0; k <= 10; k++) P.beam([x + (-5.5 + k * 1.1) * M, y + 3.75 * M, tz0], [x + (-5.5 + k * 1.1) * M, y + 3.75 * M, tz1 - .4 * M], .14 * M, TIMBER, P.PLAIN, .25 * M);
+}
+
+function ferrisWheel(P, x, z, g) {
+  const R = 19 * M, y0 = Math.max(0, g), hubY = y0 + R + 4 * M, ux = 1, uz = 0, vx = 0, vz = 1, N = 24, w = 1.8 * M;
+  const rim = (k, side, rr = R) => { const t = k / N * Math.PI * 2; return [x + ux * Math.cos(t) * rr + vx * side * w, hubY + Math.sin(t) * rr, z + uz * Math.cos(t) * rr + vz * side * w]; };
+  for (const side of [-1, 1]) for (let k = 0; k < N; k++) {
+    P.beam(rim(k, side), rim(k + 1, side), .45 * M, WHITE);
+    P.beam([x + vx * side * w * .4, hubY, z + vz * side * w * .4], rim(k, side), .12 * M, STEEL);
+  }
+  for (let k = 0; k < N; k++) {
+    P.beam(rim(k, -1), rim(k, 1), .25 * M, WHITE);
+    // gondola hanging below the rim
+    const p = rim(k, 0, R + .2 * M), c = k % 3 === 0 ? RED : k % 3 === 1 ? hex('#2f6fb0') : hex('#e9b51f');
+    P.box(p[0], p[2], p[1] - 2.6 * M, p[1] - .4 * M, 1.1 * M, 1.1 * M, ux, uz, c);
+  }
+  P.beam([x - vx * 2.8 * M, hubY, z - vz * 2.8 * M], [x + vx * 2.8 * M, hubY, z + vz * 2.8 * M], 1.8 * M, STEEL); // hub axle
+  // A-frame supports on both sides of the wheel plane
+  for (const side of [-1, 1]) for (const s of [-1, 1]) P.beam([x + ux * s * 9 * M + vx * side * 6 * M, y0, z + uz * s * 9 * M + vz * side * 6 * M], [x + vx * side * 2.4 * M, hubY, z + vz * side * 2.4 * M], .9 * M, WHITE);
+  P.box(x, z, y0, y0 + 3.2 * M, 6 * M, 4 * M, ux, uz, hex('#2f6fb0'), P.PLAIN, { wall: { style: 1, bay: 2.5, floorH: 3.2 } }); // boarding station
+}
+
+function aquariumDome(P, x, z, g) {
+  const y0 = Math.max(0, g) + .3 * M, R = 14 * M, SIDES = 16, RINGS = 6, GLASS = hex('#7fa9b8');
+  P.cyl(x, z, y0 - 1 * M, y0 + 2.5 * M, R * 1.04, R * 1.04, SIDES, CONCRETE);
+  const rings = [];
+  for (let r = 0; r <= RINGS; r++) {
+    const ph = r / RINGS * Math.PI / 2 * .98, rr = Math.cos(ph) * R, yy = y0 + 2.5 * M + Math.sin(ph) * R * .85, ring = [];
+    for (let s = 0; s < SIDES; s++) { const t = (s + (r % 2) * .5) / SIDES * Math.PI * 2; ring.push([x + Math.cos(t) * rr, yy, z + Math.sin(t) * rr]); }
+    rings.push(ring);
+  }
+  P.loft(rings, GLASS, P.ctx.roof(14), { caps: false, axis: [x, y0, z] });
+  P.cyl(x, z, rings[RINGS][0][1], rings[RINGS][0][1] + .6 * M, Math.cos(Math.PI / 2 * .98) * R + .2 * M, 0, SIDES, STEEL);
+  // entrance canopy
+  P.box(x, z + R + 3 * M, y0 + 3 * M, y0 + 3.4 * M, 5 * M, 3.5 * M, 1, 0, WHITE);
+}
+
+function marina(ctx, nextId) {
+  let n = 0;
+  const [mx, mz] = MARINA.wheel;
+  const P = painter(ctx, mx, mz, 0, nextId());
+  for (const [x0, z0, x1, z1] of MARINA.pontoons) { pontoon(P, x0, z0, x1, z1); n++; }
+  for (const [x, z] of MARINA.lighthouses) { lighthouse(P, x, z, ctx.elev(x, z)); n++; }
+  MARINA.pavilions.forEach(([x, z], k) => { pavilion(P, x, z, ctx.elev(x, z), k / 3); n++; });
+  ferrisWheel(P, mx, mz, ctx.elev(mx, mz)); n++;
+  const [dx, dz] = MARINA.dome;
+  aquariumDome(painter(ctx, dx, dz, ctx.elev(dx, dz), nextId()), dx, dz, ctx.elev(dx, dz)); n++;
+  return n;
+}
+
 /* -------------------------------------------------------------- entry */
 export function buildLandmarks(ctx) {
   let id = ctx.firstId;
   const nextId = () => id++; // ids past the last building are never pickable
   const stats = {};
   stats.shipyardCranes = shipyards(ctx, nextId);
+  stats.marinaPieces = marina(ctx, nextId);
   return stats;
 }
 
